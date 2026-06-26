@@ -1,6 +1,6 @@
 /**
  * /api/quotes/[id]
- * GET    — fetch a single quote with line items & approvals
+ * GET    — fetch a single quote with line items & approvals (live FX for non-finalized)
  * PUT    — update a quote (re-compute if selection changed)
  * DELETE — permanently delete a quote and its line items
  */
@@ -9,6 +9,9 @@ import { db } from '@/lib/db'
 import { TENANT_ID, computeQuote } from '@/lib/server/pricingEngine'
 
 export const dynamic = 'force-dynamic'
+
+/** Statuses where the FX rate should stay frozen (client has seen the quote) */
+const FINALIZED_STATUSES = new Set(['SENT', 'APPROVED', 'VIEWED'])
 
 export async function GET(
   _req: NextRequest,
@@ -35,6 +38,33 @@ export async function GET(
       return NextResponse.json({ error: 'Quote not found' }, { status: 404 })
     }
 
+    // For non-finalized quotes, fetch live FX rate and recompute USD
+    if (!FINALIZED_STATUSES.has(quote.status)) {
+      const fx = await db.fxRate.findFirst()
+      const liveRate = fx?.rate ?? 83
+      if (liveRate !== quote.usdInrRateSnapshot) {
+        const subtotalAfterDiscount = Math.max(0, quote.subtotalInr - quote.discountInr)
+        const newGst = quote.billingCurrency === 'USD' ? 0 : Math.round(subtotalAfterDiscount * (quote.gstRateSnapshot / 100))
+        const newTotal = subtotalAfterDiscount + newGst
+        const newUsd = Math.round((newTotal / liveRate) * 100) / 100
+
+        await db.quote.update({
+          where: { id },
+          data: {
+            usdInrRateSnapshot: liveRate,
+            gstAmountInr: newGst,
+            totalInr: newTotal,
+            totalUsd: newUsd,
+          },
+        })
+
+        quote.usdInrRateSnapshot = liveRate
+        quote.gstAmountInr = newGst
+        quote.totalInr = newTotal
+        quote.totalUsd = newUsd
+      }
+    }
+
     return NextResponse.json({ data: quote })
   } catch (err) {
     console.error('[GET /api/quotes/[id]] error:', err)
@@ -59,7 +89,10 @@ export async function PUT(
         clientId: string
         frameworkId: string
         tierId: string
+        billingCurrency?: string
         includeRetainer: boolean
+        retainerMode?: string
+        retainerCustomInr?: number | null
         selectedAuditorFeeIds: string[]
         selectedAddonIds: string[]
         grcToolEnabled: boolean
@@ -69,6 +102,8 @@ export async function PUT(
         internalHours: number
         internalHourlyRate: number
         discountPct: number
+        discountMode?: string
+        discountFixedInr?: number
         discountReason: string
         validUntilDays: number
         notes: string
@@ -87,9 +122,12 @@ export async function PUT(
         clientId: selection.clientId,
         frameworkId: selection.frameworkId,
         tierId: selection.tierId,
+        billingCurrency: selection.billingCurrency || existing.billingCurrency || 'INR',
         subtotalInr: computed.subtotalInr,
         discountInr: computed.discountInr,
-        discountPct: selection.discountPct || 0,
+        discountPct: computed.discountPct || selection.discountPct || 0,
+        discountMode: selection.discountMode || 'percent',
+        discountFixedInr: selection.discountFixedInr || 0,
         discountReason: selection.discountReason || null,
         gstAmountInr: computed.gstAmountInr,
         totalInr: computed.totalInr,
@@ -97,6 +135,8 @@ export async function PUT(
         usdInrRateSnapshot: computed.usdInrRate,
         gstRateSnapshot: computed.gstRate,
         includeRetainer: selection.includeRetainer,
+        retainerMode: selection.retainerMode || 'percent',
+        retainerCustomInr: selection.retainerCustomInr || 0,
         retainerAmountInr: computed.retainerAmountInr,
         internalHours: selection.internalHours || 0,
         internalHourlyRate: selection.internalHourlyRate || 0,

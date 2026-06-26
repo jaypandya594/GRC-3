@@ -4,6 +4,16 @@
  */
 
 /**
+ * Format a number as INR using the Indian lakh system (PDF-safe, no ₹ glyph).
+ * Uses "Rs." instead of "₹" for compatibility with jsPDF's default Helvetica.
+ * Example: 150000 → "Rs.1,50,000"
+ */
+export function formatINRPdf(amount: number): string {
+  const rounded = Math.round(amount)
+  return 'Rs.' + rounded.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+}
+
+/**
  * Format a number as INR using the Indian lakh system.
  * Example: 150000 → "₹1,50,000"
  */
@@ -41,6 +51,33 @@ export function formatUSD(amount: number): string {
 export function inrToUsd(inr: number, rate: number): number {
   if (!rate || rate <= 0) return 0
   return Math.round((inr / rate) * 100) / 100
+}
+
+/**
+ * Format an INR amount according to the selected billing currency.
+ * Returns formatINR(amountInr) when billingCurrency is 'INR',
+ * or formatUSD(amountInr / usdInrRate) when billingCurrency is 'USD'.
+ * Use this ONE helper everywhere a line-item amount is displayed so all
+ * line types (consulting_fee, retainer, auditor_fee, addon, grc_tool,
+ * dpo_vciso, discount, etc.) automatically render in the correct currency
+ * with no per-type code needed.
+ */
+export function formatLineAmount(amountInr: number, billingCurrency: string, usdInrRate: number): string {
+  if (billingCurrency === 'USD') {
+    return formatUSD(inrToUsd(amountInr, usdInrRate))
+  }
+  return formatINR(amountInr)
+}
+
+/**
+ * PDF-safe version of formatLineAmount.
+ * Uses formatINRPdf (Rs.) instead of formatINR (₹) for jsPDF compatibility.
+ */
+export function formatLineAmountPdf(amountInr: number, billingCurrency: string, usdInrRate: number): string {
+  if (billingCurrency === 'USD') {
+    return formatUSD(inrToUsd(amountInr, usdInrRate))
+  }
+  return formatINRPdf(amountInr)
 }
 
 /**

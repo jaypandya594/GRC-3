@@ -32,6 +32,7 @@ export async function computeQuote(
 
   let subtotal = 0
   let retainerAmount = 0
+  const isUsd = selection.billingCurrency === 'USD'
 
   // 1. Consulting fees (multiple frameworks)
   const fwIds = selection.selectedFrameworkIds || []
@@ -46,9 +47,14 @@ export async function computeQuote(
       })
       if (price) {
         subtotal += price.projectFeeInr
-        if (selection.includeRetainer && price.retainerFeeInr > 0) {
-          retainerAmount += price.retainerFeeInr
-          subtotal += price.retainerFeeInr
+        // Retainer
+        if (selection.includeRetainer) {
+          const isFixed = selection.retainerMode === 'fixed' && selection.retainerCustomInr != null && selection.retainerCustomInr > 0
+          const retainerFee = isFixed ? selection.retainerCustomInr : price.retainerFeeInr
+          if (retainerFee > 0) {
+            retainerAmount += retainerFee
+            subtotal += retainerFee
+          }
         }
       }
     }
@@ -84,12 +90,19 @@ export async function computeQuote(
     if (pkg) subtotal += pkg.feeInrAnnual
   }
 
-  // 6. Discount from percentage
-  const discountPct = Math.max(0, Math.min(100, selection.discountPct || 0))
-  const discountInr = Math.round(subtotal * (discountPct / 100))
+  // 6. Discount
+  let discountInr = 0
+  let discountPct = 0
+  if (selection.discountMode === 'fixed' && selection.discountFixedInr > 0) {
+    discountInr = Math.min(selection.discountFixedInr, subtotal)
+    discountPct = subtotal > 0 ? Math.round((discountInr / subtotal) * 100 * 100) / 100 : 0
+  } else {
+    discountPct = Math.max(0, Math.min(100, selection.discountPct || 0))
+    discountInr = Math.round(subtotal * (discountPct / 100))
+  }
 
   const subtotalAfterDiscount = Math.max(0, subtotal - discountInr)
-  const gstAmount = Math.round(subtotalAfterDiscount * (gstRate / 100))
+  const gstAmount = isUsd ? 0 : Math.round(subtotalAfterDiscount * (gstRate / 100))
   const total = subtotalAfterDiscount + gstAmount
   const totalUsd = Math.round((total / usdInrRate) * 100) / 100
 

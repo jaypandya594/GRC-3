@@ -27,6 +27,7 @@ export interface QuoteCalculation {
   internalTimeCostInr: number
   gstRate: number
   usdInrRate: number
+  billingCurrency: 'INR' | 'USD'
 }
 
 export interface PricingContext {
@@ -104,16 +105,22 @@ export function calculateQuote(
         subtotal += price.projectFeeInr
 
         // Retainer (if toggled, apply per-framework)
-        if (selection.includeRetainer && price.retainerFeeInr > 0) {
-          retainerAmount += price.retainerFeeInr
-          lines.push({
-            lineType: 'retainer',
-            description: `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
-            referenceId: tier.id,
-            amountInr: price.retainerFeeInr,
-            sortOrder: sortOrder++,
-          })
-          subtotal += price.retainerFeeInr
+        if (selection.includeRetainer) {
+          const isFixed = selection.retainerMode === 'fixed' && selection.retainerCustomInr != null && selection.retainerCustomInr > 0
+          const retainerFee = isFixed ? selection.retainerCustomInr : price.retainerFeeInr
+          if (retainerFee > 0) {
+            retainerAmount += retainerFee
+            lines.push({
+              lineType: 'retainer',
+              description: isFixed
+                ? `Annual Retainer — ${framework.name} (Custom amount)`
+                : `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
+              referenceId: tier.id,
+              amountInr: retainerFee,
+              sortOrder: sortOrder++,
+            })
+            subtotal += retainerFee
+          }
         }
       }
     }
@@ -191,15 +198,30 @@ export function calculateQuote(
   }
 
   // 6. Discount (applied by Finance — negative line)
-  const discountPct = Math.max(0, Math.min(100, selection.discountPct || 0))
-  const discount = Math.round(subtotal * (discountPct / 100))
-  if (discount > 0) {
+  const isUsd = selection.billingCurrency === 'USD'
+  let discount = 0
+  let effectiveDiscountPct = 0
+  if (selection.discountMode === 'fixed' && selection.discountFixedInr > 0) {
+    discount = Math.min(selection.discountFixedInr, subtotal) // can't discount more than subtotal
+    effectiveDiscountPct = subtotal > 0 ? Math.round((discount / subtotal) * 100 * 100) / 100 : 0
     lines.push({
       lineType: 'discount',
-      description: `Discount (${discountPct}%)${selection.discountReason ? ` — ${selection.discountReason}` : ''}`,
+      description: `Discount (Fixed)${selection.discountReason ? ` — ${selection.discountReason}` : ''}`,
       amountInr: -discount,
       sortOrder: sortOrder++,
     })
+  } else {
+    const discountPct = Math.max(0, Math.min(100, selection.discountPct || 0))
+    discount = Math.round(subtotal * (discountPct / 100))
+    effectiveDiscountPct = discountPct
+    if (discount > 0) {
+      lines.push({
+        lineType: 'discount',
+        description: `Discount (${discountPct}%)${selection.discountReason ? ` — ${selection.discountReason}` : ''}`,
+        amountInr: -discount,
+        sortOrder: sortOrder++,
+      })
+    }
   }
 
   // 7. Internal time (advisory — NOT added to subtotal, shown separately)
@@ -214,7 +236,7 @@ export function calculateQuote(
   }
 
   const subtotalAfterDiscount = Math.max(0, subtotal - discount)
-  const gstAmount = Math.round(subtotalAfterDiscount * (gstRate / 100))
+  const gstAmount = isUsd ? 0 : Math.round(subtotalAfterDiscount * (gstRate / 100))
   const total = subtotalAfterDiscount + gstAmount
   const totalUsd = Math.round((total / usdInrRate) * 100) / 100
 
@@ -222,7 +244,7 @@ export function calculateQuote(
     lines,
     subtotalInr: subtotal,
     discountInr: discount,
-    discountPct: discountPct,
+    discountPct: effectiveDiscountPct,
     gstAmountInr: gstAmount,
     totalInr: total,
     totalUsd,
@@ -230,6 +252,7 @@ export function calculateQuote(
     internalTimeCostInr: internalTimeCost,
     gstRate,
     usdInrRate,
+    billingCurrency: selection.billingCurrency || 'INR',
   }
 }
 
@@ -318,9 +341,12 @@ export const FRAMEWORK_CATEGORY_META: Record<string, { label: string; color: str
 
 export const DEFAULT_QUOTE_BUILDER_SELECTION: QuoteBuilderSelection = {
   clientId: null,
+  billingCurrency: 'INR',
   selectedFrameworkIds: [],
   tierId: null,
   includeRetainer: false,
+  retainerMode: 'percent',
+  retainerCustomInr: null,
   selectedAuditorFeeIds: [],
   selectedAddonIds: [],
   grcToolEnabled: false,
@@ -330,6 +356,8 @@ export const DEFAULT_QUOTE_BUILDER_SELECTION: QuoteBuilderSelection = {
   internalHours: 0,
   internalHourlyRate: 0,
   discountPct: 0,
+  discountMode: 'percent',
+  discountFixedInr: 0,
   discountReason: '',
   validUntilDays: 30,
   notes: '',

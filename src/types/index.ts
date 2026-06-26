@@ -107,6 +107,7 @@ export interface Tier {
   id: string
   tenantId?: string | null
   name: string
+  description?: string | null
   retainerPct: number
   sortOrder: number
   isActive: boolean
@@ -221,9 +222,12 @@ export interface Quote {
   status: QuoteStatus
   frameworkId: string
   tierId: string
+  billingCurrency: string
   subtotalInr: number
   discountInr: number
   discountPct: number
+  discountMode: string
+  discountFixedInr: number
   discountReason?: string | null
   gstAmountInr: number
   totalInr: number
@@ -231,6 +235,8 @@ export interface Quote {
   usdInrRateSnapshot: number
   gstRateSnapshot: number
   includeRetainer: boolean
+  retainerMode: string
+  retainerCustomInr: number
   retainerAmountInr: number
   internalHours: number
   internalHourlyRate: number
@@ -253,9 +259,12 @@ export interface Quote {
 // ── Quote builder state (Zustand) ─────────────────────────────
 export interface QuoteBuilderSelection {
   clientId: string | null
+  billingCurrency: 'INR' | 'USD'
   selectedFrameworkIds: string[]
   tierId: string | null
   includeRetainer: boolean
+  retainerMode: 'percent' | 'fixed'
+  retainerCustomInr: number | null
   selectedAuditorFeeIds: string[]
   selectedAddonIds: string[]
   grcToolEnabled: boolean
@@ -265,6 +274,8 @@ export interface QuoteBuilderSelection {
   internalHours: number
   internalHourlyRate: number
   discountPct: number
+  discountMode: 'percent' | 'fixed'
+  discountFixedInr: number
   discountReason: string
   validUntilDays: number
   notes: string

@@ -1,0 +1,688 @@
+     1→     1→/**
+     2→     2→ * iSecurify — Interactive Dashboard view
+     3→     3→ * Pipeline stats, revenue chart, top frameworks, recent quotes with drill-down.
+     4→     4→ */
+     5→     5→'use client'
+     6→     6→
+     7→     7→import { useQuery, useMutation } from '@tanstack/react-query'
+     8→     8→import { api } from '@/lib/api-client'
+     9→     9→import { formatINR, formatNumberIN, formatRelativeTime } from '@/lib/currency'
+    10→    10→import { StatusBadge } from '@/components/isecurify/Atoms'
+    11→    11→import { TopBar } from '@/components/isecurify/Shell'
+    12→    12→import { useNavStore } from '@/store'
+    13→    13→import { cn } from '@/lib/utils'
+    14→    14→import { toast } from 'sonner'
+    15→    15→import { useState, useEffect, useRef, useCallback } from 'react'
+    16→    16→import { motion, AnimatePresence } from 'framer-motion'
+    17→    17→import {
+    18→    18→  FileText,
+    19→    19→  TrendingUp,
+    20→    20→  Users,
+    21→    21→  Wallet,
+    22→    22→  ArrowUpRight,
+    23→    23→  BarChart3,
+    24→    24→  Plus,
+    25→    25→  Loader2,
+    26→    26→  Building2,
+    27→    27→  Filter,
+    28→    28→  Download,
+    29→    29→  X,
+    30→    30→} from 'lucide-react'
+    31→    31→import {
+    32→    32→  BarChart,
+    33→    33→  Bar,
+    34→    34→  XAxis,
+    35→    35→  YAxis,
+    36→    36→  Tooltip,
+    37→    37→  ResponsiveContainer,
+    38→    38→  CartesianGrid,
+    39→    39→  PieChart,
+    40→    40→  Pie,
+    41→    41→  Cell,
+    42→    42→  Legend,
+    43→    43→} from 'recharts'
+    44→    44→import type { DashboardStats } from '@/types'
+    45→    45→
+    46→    46→const PIE_COLORS = ['#812671', '#1B887D', '#C46C1D', '#146F9E', '#A12E87', '#45B0AD', '#FF8938', '#5D90EE']
+    47→    47→
+    48→    48→const TIME_RANGES = [
+    49→    49→  { id: 3, label: '3M' },
+    50→    50→  { id: 6, label: '6M' },
+    51→    51→  { id: 12, label: '12M' },
+    52→    52→]
+    53→    53→
+    54→    54→export function DashboardView() {
+    55→    55→  const { navigate } = useNavStore()
+    56→    56→  const [timeRange, setTimeRange] = useState(6)
+    57→    57→  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+    58→    58→  const [frameworkFilter, setFrameworkFilter] = useState<string | null>(null)
+    59→    59→  const [addClientOpen, setAddClientOpen] = useState(false)
+    60→    60→
+    61→    61→  const { data: stats, isLoading } = useQuery({
+    62→    62→    queryKey: ['dashboard'],
+    63→    63→    queryFn: () => api.get<DashboardStats>('/dashboard'),
+    64→    64→  })
+    65→    65→
+    66→    66→  const totalQuotes = stats?.totalQuotes ?? 0
+    67→    67→  const quotesByStatus = stats?.quotesByStatus ?? {}
+    68→    68→  const pipelineValue = stats?.pipelineValueInr ?? 0
+    69→    69→  const wonValue = stats?.wonValueInr ?? 0
+    70→    70→  const activeClients = stats?.activeClients ?? 0
+    71→    71→  const totalClients = stats?.totalClients ?? 0
+    72→    72→  const avgValue = stats?.avgQuoteValueInr ?? 0
+    73→    73→  const topFrameworks = stats?.topFrameworks ?? []
+    74→    74→  const monthlyRevenue = stats?.monthlyRevenue ?? []
+    75→    75→  const recentQuotes = stats?.recentQuotes ?? []
+    76→    76→
+    77→    77→  // Filtered recent quotes
+    78→    78→  const filteredQuotes = recentQuotes.filter((q) => {
+    79→    79→    if (statusFilter && q.status !== statusFilter) return false
+    80→    80→    if (frameworkFilter && q.framework?.name !== frameworkFilter) return false
+    81→    81→    return true
+    82→    82→  })
+    83→    83→
+    84→    84→  const statusPieData = Object.entries(quotesByStatus).map(([name, value]) => ({
+    85→    85→    name: name.replace(/_/g, ' '),
+    86→    86→    value,
+    87→    87→    statusKey: name,
+    88→    88→  }))
+    89→    89→
+    90→    90→  const activeFilters = [statusFilter, frameworkFilter].filter(Boolean)
+    91→    91→
+    92→    92→  const clearFilters = () => {
+    93→    93→    setStatusFilter(null)
+    94→    94→    setFrameworkFilter(null)
+    95→    95→  }
+    96→    96→
+    97→    97→  return (
+    98→    98→    <>
+    99→    99→      <TopBar
+   100→   100→        title="Dashboard"
+   101→   101→        subtitle="GRC pricing pipeline overview"
+   102→   102→        action={
+   103→   103→          <button
+   104→   104→            onClick={() => navigate('quote-builder')}
+   105→   105→            className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 transition-colors"
+   106→   106→          >
+   107→   107→            <Plus className="h-4 w-4" />
+   108→   108→            New Quote
+   109→   109→          </button>
+   110→   110→        }
+   111→   111→      />
+   112→   112→
+   113→   113→      <div className="p-4 md:p-8 space-y-6">
+   114→   114→        {isLoading ? (
+   115→   115→          <div className="flex items-center justify-center py-20">
+   116→   116→            <Loader2 className="h-6 w-6 animate-spin text-brand-600" />
+   117→   117→          </div>
+   118→   118→        ) : (
+   119→   119→          <>
+   120→   120→            {/* Quick Actions */}
+   121→   121→            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+   122→   122→              <motion.button
+   123→   123→                whileHover={{ scale: 1.02 }}
+   124→   124→                whileTap={{ scale: 0.98 }}
+   125→   125→                onClick={() => navigate('quote-builder')}
+   126→   126→                className="flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 p-4 text-left hover:bg-brand-100 transition-colors"
+   127→   127→              >
+   128→   128→                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-700 text-white">
+   129→   129→                  <Plus className="h-5 w-5" />
+   130→   130→                </span>
+   131→   131→                <div>
+   132→   132→                  <p className="text-sm font-semibold text-brand-900">New Quote</p>
+   133→   133→                  <p className="text-xs text-brand-700">Start a new compliance proposal</p>
+   134→   134→                </div>
+   135→   135→              </motion.button>
+   136→   136→
+   137→   137→              <motion.button
+   138→   138→                whileHover={{ scale: 1.02 }}
+   139→   139→                whileTap={{ scale: 0.98 }}
+   140→   140→                onClick={() => setAddClientOpen(true)}
+   141→   141→                className="flex items-center gap-3 rounded-xl border border-brand-teal-200 bg-brand-teal-50 p-4 text-left hover:bg-brand-teal-100 transition-colors"
+   142→   142→              >
+   143→   143→                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-teal-600 text-white">
+   144→   144→                  <Building2 className="h-5 w-5" />
+   145→   145→                </span>
+   146→   146→                <div>
+   147→   147→                  <p className="text-sm font-semibold text-brand-teal-900">Add Client</p>
+   148→   148→                  <p className="text-xs text-brand-teal-700">Quickly add a new prospect</p>
+   149→   149→                </div>
+   150→   150→              </motion.button>
+   151→   151→
+   152→   152→              <motion.button
+   153→   153→                whileHover={{ scale: 1.02 }}
+   154→   154→                whileTap={{ scale: 0.98 }}
+   155→   155→                onClick={() => navigate('quotes')}
+   156→   156→                className="flex items-center gap-3 rounded-xl border border-brand-orange-200 bg-brand-orange-50 p-4 text-left hover:bg-brand-orange-100 transition-colors"
+   157→   157→              >
+   158→   158→                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-orange-600 text-white">
+   159→   159→                  <FileText className="h-5 w-5" />
+   160→   160→                </span>
+   161→   161→                <div>
+   162→   162→                  <p className="text-sm font-semibold text-brand-orange-900">View Pipeline</p>
+   163→   163→                  <p className="text-xs text-brand-orange-700">Browse all quotes and status</p>
+   164→   164→                </div>
+   165→   165→              </motion.button>
+   166→   166→            </div>
+   167→   167→
+   168→   168→            {/* KPI cards — clickable */}
+   169→   169→            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+   170→   170→              <motion.div whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 300 }}>
+   171→   171→                <button
+   172→   172→                  onClick={() => navigate('quotes')}
+   173→   173→                  className="w-full text-left rounded-xl border border-slate-200 bg-white p-4 md:p-5 hover:shadow-md hover:border-brand-200 transition-all"
+   174→   174→                >
+   175→   175→                  <div className="flex items-center justify-between mb-3">
+   176→   176→                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+   177→   177→                      <FileText className="h-5 w-5" />
+   178→   178→                    </span>
+   179→   179→                    <ArrowUpRight className="h-4 w-4 text-slate-300" />
+   180→   180→                  </div>
+   181→   181→                  <p className="text-xs text-slate-500">Total Quotes</p>
+   182→   182→                  <p className="text-lg md:text-xl font-bold text-slate-900 mt-0.5">
+   183→   183→                    <AnimatedCounter value={totalQuotes} />
+   184→   184→                  </p>
+   185→   185→                </button>
+   186→   186→              </motion.div>
+   187→   187→
+   188→   188→              <motion.div whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 300 }}>
+   189→   189→                <button
+   190→   190→                  onClick={() => navigate('quotes')}
+   191→   191→                  className="w-full text-left rounded-xl border border-slate-200 bg-white p-4 md:p-5 hover:shadow-md hover:border-amber-200 transition-all"
+   192→   192→                >
+   193→   193→                  <div className="flex items-center justify-between mb-3">
+   194→   194→                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+   195→   195→                      <Wallet className="h-5 w-5" />
+   196→   196→                    </span>
+   197→   197→                    <ArrowUpRight className="h-4 w-4 text-slate-300" />
+   198→   198→                  </div>
+   199→   199→                  <p className="text-xs text-slate-500">Pipeline Value</p>
+   200→   200→                  <p className="text-lg md:text-xl font-bold text-slate-900 mt-0.5 truncate">
+   201→   201→                    {formatINR(pipelineValue)}
+   202→   202→                  </p>
+   203→   203→                </button>
+   204→   204→              </motion.div>
+   205→   205→
+   206→   206→              <motion.div whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 300 }}>
+   207→   207→                <button
+   208→   208→                  onClick={() => navigate('clients')}
+   209→   209→                  className="w-full text-left rounded-xl border border-slate-200 bg-white p-4 md:p-5 hover:shadow-md hover:border-violet-200 transition-all"
+   210→   210→                >
+   211→   211→                  <div className="flex items-center justify-between mb-3">
+   212→   212→                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 text-violet-700">
+   213→   213→                      <Users className="h-5 w-5" />
+   214→   214→                    </span>
+   215→   215→                    <ArrowUpRight className="h-4 w-4 text-slate-300" />
+   216→   216→                  </div>
+   217→   217→                  <p className="text-xs text-slate-500">Active Clients</p>
+   218→   218→                  <p className="text-lg md:text-xl font-bold text-slate-900 mt-0.5">
+   219→   219→                    {activeClients} / {totalClients}
+   220→   220→                  </p>
+   221→   221→                </button>
+   222→   222→              </motion.div>
+   223→   223→
+   224→   224→              <motion.div whileHover={{ y: -2 }} transition={{ type: 'spring', stiffness: 300 }}>
+   225→   225→                <button
+   226→   226→                  onClick={() => navigate('quotes')}
+   227→   227→                  className="w-full text-left rounded-xl border border-slate-200 bg-white p-4 md:p-5 hover:shadow-md hover:border-emerald-200 transition-all"
+   228→   228→                >
+   229→   229→                  <div className="flex items-center justify-between mb-3">
+   230→   230→                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+   231→   231→                      <TrendingUp className="h-5 w-5" />
+   232→   232→                    </span>
+   233→   233→                    <ArrowUpRight className="h-4 w-4 text-slate-300" />
+   234→   234→                  </div>
+   235→   235→                  <p className="text-xs text-slate-500">Avg. Quote Value</p>
+   236→   236→                  <p className="text-lg md:text-xl font-bold text-slate-900 mt-0.5 truncate">
+   237→   237→                    {formatINR(avgValue)}
+   238→   238→                  </p>
+   239→   239→                </button>
+   240→   240→              </motion.div>
+   241→   241→            </div>
+   242→   242→
+   243→   243→            {/* Charts row */}
+   244→   244→            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+   245→   245→              {/* Monthly revenue with time range selector */}
+   246→   246→              <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-5">
+   247→   247→                <div className="flex items-center justify-between mb-4">
+   248→   248→                  <div>
+   249→   249→                    <h3 className="text-sm font-semibold text-slate-900">Approved Revenue Trend</h3>
+   250→   250→                    <p className="text-xs text-slate-500">INR (Lakh format)</p>
+   251→   251→                  </div>
+   252→   252→                  <div className="flex items-center gap-2">
+   253→   253→                    <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+   254→   254→                      {TIME_RANGES.map((tr) => (
+   255→   255→                        <button
+   256→   256→                          key={tr.id}
+   257→   257→                          onClick={() => setTimeRange(tr.id)}
+   258→   258→                          className={cn(
+   259→   259→                            'px-3 py-1.5 text-xs font-medium transition-colors',
+   260→   260→                            timeRange === tr.id
+   261→   261→                              ? 'bg-brand-700 text-white'
+   262→   262→                              : 'bg-white text-slate-600 hover:bg-slate-50',
+   263→   263→                          )}
+   264→   264→                        >
+   265→   265→                          {tr.label}
+   266→   266→                        </button>
+   267→   267→                      ))}
+   268→   268→                    </div>
+   269→   269→                    <BarChart3 className="h-4 w-4 text-slate-400" />
+   270→   270→                  </div>
+   271→   271→                </div>
+   272→   272→                <ResponsiveContainer width="100%" height={260}>
+   273→   273→                  <BarChart data={monthlyRevenue.slice(-timeRange)}>
+   274→   274→                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+   275→   275→                    <XAxis dataKey="month" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+   276→   276→                    <YAxis
+   277→   277→                      tick={{ fontSize: 11, fill: '#64748b' }}
+   278→   278→                      axisLine={false}
+   279→   279→                      tickLine={false}
+   280→   280→                      tickFormatter={(v) => v >= 10000000 ? `${(v / 10000000).toFixed(1)}Cr` : v >= 100000 ? `${(v / 100000).toFixed(1)}L` : `${v / 1000}k`}
+   281→   281→                    />
+   282→   282→                    <Tooltip
+   283→   283→                      formatter={(v: number) => [formatINR(v), 'Revenue']}
+   284→   284→                      contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+   285→   285→                    />
+   286→   286→                    <Bar
+   287→   287→                      dataKey="valueInr"
+   288→   288→                      fill="#1B887D"
+   289→   289→                      radius={[6, 6, 0, 0]}
+   290→   290→                      cursor="pointer"
+   291→   291→                      onClick={(data) => {
+   292→   292→                        if (data && data.activePayload?.[0]?.payload) {
+   293→   293→                          toast.info(`Revenue in ${data.activePayload[0].payload.month}: ${formatINR(data.activePayload[0].payload.valueInr)}`)
+   294→   294→                        }
+   295→   295→                      }}
+   296→   296→                    />
+   297→   297→                  </BarChart>
+   298→   298→                </ResponsiveContainer>
+   299→   299→              </div>
+   300→   300→
+   301→   301→              {/* Status distribution — clickable pie */}
+   302→   302→              <div className="rounded-xl border border-slate-200 bg-white p-5">
+   303→   303→                <div className="flex items-center justify-between mb-1">
+   304→   304→                  <h3 className="text-sm font-semibold text-slate-900">Quotes by Status</h3>
+   305→   305→                  <Filter className="h-4 w-4 text-slate-400" />
+   306→   306→                </div>
+   307→   307→                <p className="text-xs text-slate-500 mb-4">Click a segment to filter</p>
+   308→   308→                {statusPieData.length === 0 ? (
+   309→   309→                  <div className="h-[260px] flex items-center justify-center text-sm text-slate-400">
+   310→   310→                    No quotes yet
+   311→   311→                  </div>
+   312→   312→                ) : (
+   313→   313→                  <ResponsiveContainer width="100%" height={260}>
+   314→   314→                    <PieChart>
+   315→   315→                      <Pie
+   316→   316→                        data={statusPieData}
+   317→   317→                        dataKey="value"
+   318→   318→                        nameKey="name"
+   319→   319→                        cx="50%"
+   320→   320→                        cy="50%"
+   321→   321→                        outerRadius={80}
+   322→   322→                        innerRadius={40}
+   323→   323→                        paddingAngle={2}
+   324→   324→                        cursor="pointer"
+   325→   325→                        onClick={(data) => {
+   326→   326→                          if (data && data.statusKey) {
+   327→   327→                            setStatusFilter((prev) => prev === data.statusKey ? null : data.statusKey)
+   328→   328→                          }
+   329→   329→                        }}
+   330→   330→                      >
+   331→   331→                        {statusPieData.map((entry, i) => (
+   332→   332→                          <Cell
+   333→   333→                            key={i}
+   334→   334→                            fill={PIE_COLORS[i % PIE_COLORS.length]}
+   335→   335→                            stroke={statusFilter === entry.statusKey ? '#812671' : 'transparent'}
+   336→   336→                            strokeWidth={statusFilter === entry.statusKey ? 3 : 0}
+   337→   337→                          />
+   338→   338→                        ))}
+   339→   339→                      </Pie>
+   340→   340→                      <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }} />
+   341→   341→                      <Legend wrapperStyle={{ fontSize: 11 }} />
+   342→   342→                    </PieChart>
+   343→   343→                  </ResponsiveContainer>
+   344→   344→                )}
+   345→   345→
+   346→   346→                {/* Status filter chips */}
+   347→   347→                {Object.entries(quotesByStatus).length > 0 && (
+   348→   348→                  <div className="flex flex-wrap gap-1.5 mt-3">
+   349→   349→                    {Object.entries(quotesByStatus).map(([key, count]) => (
+   350→   350→                      <button
+   351→   351→                        key={key}
+   352→   352→                        onClick={() => setStatusFilter((prev) => prev === key ? null : key)}
+   353→   353→                        className={cn(
+   354→   354→                          'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+   355→   355→                          statusFilter === key
+   356→   356→                            ? 'bg-brand-700 text-white'
+   357→   357→                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+   358→   358→                        )}
+   359→   359→                      >
+   360→   360→                        {key.replace(/_/g, ' ')} ({count})
+   361→   361→                      </button>
+   362→   362→                    ))}
+   363→   363→                  </div>
+   364→   364→                )}
+   365→   365→              </div>
+   366→   366→            </div>
+   367→   367→
+   368→   368→            {/* Top frameworks + recent quotes */}
+   369→   369→            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+   370→   370→              {/* Top frameworks — clickable */}
+   371→   371→              <div className="rounded-xl border border-slate-200 bg-white p-5">
+   372→   372→                <h3 className="text-sm font-semibold text-slate-900 mb-4">Top Frameworks</h3>
+   373→   373→                <div className="space-y-2">
+   374→   374→                  {topFrameworks.length === 0 ? (
+   375→   375→                    <p className="text-sm text-slate-400 py-6 text-center">No data yet</p>
+   376→   376→                  ) : (
+   377→   377→                    topFrameworks.map((fw, i) => (
+   378→   378→                      <motion.button
+   379→   379→                        key={fw.name}
+   380→   380→                        whileHover={{ x: 4 }}
+   381→   381→                        onClick={() => setFrameworkFilter((prev) => prev === fw.name ? null : fw.name)}
+   382→   382→                        className={cn(
+   383→   383→                          'w-full flex items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors',
+   384→   384→                          frameworkFilter === fw.name
+   385→   385→                            ? 'bg-brand-50 ring-1 ring-brand-200'
+   386→   386→                            : 'hover:bg-slate-50',
+   387→   387→                        )}
+   388→   388→                      >
+   389→   389→                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-50 text-xs font-bold text-brand-700 shrink-0">
+   390→   390→                          {i + 1}
+   391→   391→                        </span>
+   392→   392→                        <div className="flex-1 min-w-0">
+   393→   393→                          <p className="text-sm font-medium text-slate-900 truncate">{fw.name}</p>
+   394→   394→                          <p className="text-xs text-slate-500">{fw.count} quotes • {formatINR(fw.valueInr)}</p>
+   395→   395→                        </div>
+   396→   396→                        {frameworkFilter === fw.name && (
+   397→   397→                          <X className="h-4 w-4 text-brand-600 shrink-0" />
+   398→   398→                        )}
+   399→   399→                      </motion.button>
+   400→   400→                    ))
+   401→   401→                  )}
+   402→   402→                </div>
+   403→   403→              </div>
+   404→   404→
+   405→   405→              {/* Recent quotes with filters */}
+   406→   406→              <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white">
+   407→   407→                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+   408→   408→                  <div className="flex items-center gap-2">
+   409→   409→                    <h3 className="text-sm font-semibold text-slate-900">Recent Quotes</h3>
+   410→   410→                    {filteredQuotes.length !== recentQuotes.length && (
+   411→   411→                      <span className="text-xs text-brand-700 font-medium">({filteredQuotes.length} shown)</span>
+   412→   412→                    )}
+   413→   413→                  </div>
+   414→   414→                  <div className="flex items-center gap-2">
+   415→   415→                    {activeFilters.length > 0 && (
+   416→   416→                      <button
+   417→   417→                        onClick={clearFilters}
+   418→   418→                        className="inline-flex items-center gap-1 text-xs font-medium text-rose-600 hover:text-rose-700"
+   419→   419→                      >
+   420→   420→                        <X className="h-3 w-3" /> Clear filters
+   421→   421→                      </button>
+   422→   422→                    )}
+   423→   423→                    <button
+   424→   424→                      onClick={() => navigate('quotes')}
+   425→   425→                      className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:text-brand-800"
+   426→   426→                    >
+   427→   427→                      View all <ArrowUpRight className="h-3 w-3" />
+   428→   428→                    </button>
+   429→   429→                  </div>
+   430→   430→                </div>
+   431→   431→
+   432→   432→                {/* Active filter bar */}
+   433→   433→                <AnimatePresence>
+   434→   434→                  {activeFilters.length > 0 && (
+   435→   435→                    <motion.div
+   436→   436→                      initial={{ height: 0, opacity: 0 }}
+   437→   437→                      animate={{ height: 'auto', opacity: 1 }}
+   438→   438→                      exit={{ height: 0, opacity: 0 }}
+   439→   439→                      className="overflow-hidden border-b border-slate-100"
+   440→   440→                    >
+   441→   441→                      <div className="px-5 py-2 bg-slate-50 flex flex-wrap items-center gap-2">
+   442→   442→                        <Filter className="h-3.5 w-3.5 text-slate-500" />
+   443→   443→                        {statusFilter && (
+   444→   444→                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 text-brand-800 px-2.5 py-0.5 text-xs font-medium">
+   445→   445→                            {statusFilter.replace(/_/g, ' ')}
+   446→   446→                            <button onClick={() => setStatusFilter(null)}><X className="h-3 w-3" /></button>
+   447→   447→                          </span>
+   448→   448→                        )}
+   449→   449→                        {frameworkFilter && (
+   450→   450→                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 text-brand-800 px-2.5 py-0.5 text-xs font-medium">
+   451→   451→                            {frameworkFilter}
+   452→   452→                            <button onClick={() => setFrameworkFilter(null)}><X className="h-3 w-3" /></button>
+   453→   453→                          </span>
+   454→   454→                        )}
+   455→   455→                      </div>
+   456→   456→                    </motion.div>
+   457→   457→                  )}
+   458→   458→                </AnimatePresence>
+   459→   459→
+   460→   460→                <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+   461→   461→                  {filteredQuotes.length === 0 ? (
+   462→   462→                    <div className="py-8 text-center">
+   463→   463→                      <p className="text-sm text-slate-400 mb-2">
+   464→   464→                        {activeFilters.length > 0 ? 'No quotes match the selected filters' : 'No quotes yet. Create your first quote!'}
+   465→   465→                      </p>
+   466→   466→                      {activeFilters.length > 0 && (
+   467→   467→                        <button
+   468→   468→                          onClick={clearFilters}
+   469→   469→                          className="text-xs text-brand-700 font-medium hover:underline"
+   470→   470→                        >
+   471→   471→                          Clear all filters
+   472→   472→                        </button>
+   473→   473→                      )}
+   474→   474→                    </div>
+   475→   475→                  ) : (
+   476→   476→                    filteredQuotes.map((q) => (
+   477→   477→                      <motion.button
+   478→   478→                        key={q.id}
+   479→   479→                        whileHover={{ backgroundColor: 'rgba(248,250,252,1)' }}
+   480→   480→                        onClick={() => navigate('quotes', { id: q.id })}
+   481→   481→                        className="w-full flex items-center justify-between gap-4 px-5 py-3 transition-colors text-left"
+   482→   482→                      >
+   483→   483→                        <div className="min-w-0 flex-1">
+   484→   484→                          <div className="flex items-center gap-2">
+   485→   485→                            <p className="text-sm font-medium text-slate-900 truncate">
+   486→   486→                              {q.client?.companyName || 'Unknown client'}
+   487→   487→                            </p>
+   488→   488→                            <StatusBadge status={q.status} />
+   489→   489→                          </div>
+   490→   490→                          <p className="text-xs text-slate-500 mt-0.5">
+   491→   491→                            {q.framework?.name} • {formatRelativeTime(q.createdAt)}
+   492→   492→                          </p>
+   493→   493→                        </div>
+   494→   494→                        <div className="text-right shrink-0">
+   495→   495→                          <p className="text-sm font-bold text-slate-900">{formatINR(q.totalInr)}</p>
+   496→   496→                          <p className="text-[11px] text-slate-500">v{q.version}</p>
+   497→   497→                        </div>
+   498→   498→                      </motion.button>
+   499→   499→                    ))
+   500→   500→                  )}
+   501→   501→                </div>
+   502→   502→              </div>
+   503→   503→            </div>
+   504→   504→
+   505→   505→            {/* Export CSV */}
+   506→   506→            <div className="flex justify-end">
+   507→   507→              <button
+   508→   508→                onClick={exportCsv}
+   509→   509→                disabled={recentQuotes.length === 0}
+   510→   510→                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+   511→   511→              >
+   512→   512→                <Download className="h-4 w-4" /> Export CSV
+   513→   513→              </button>
+   514→   514→            </div>
+   515→   515→          </>
+   516→   516→        )}
+   517→   517→      </div>
+   518→   518→
+   519→   519→      {/* Add Client Dialog */}
+   520→   520→      {addClientOpen && <AddClientDialog onClose={() => setAddClientOpen(false)} />}
+   521→   521→    </>
+   522→   522→  )
+   523→   523→}
+   524→   524→
+   525→   525→// ─── Animated Counter ──────────────────────────────────────────
+   526→   526→function AnimatedCounter({ value, duration = 1200 }: { value: number; duration?: number }) {
+   527→   527→  const [display, setDisplay] = useState(0)
+   528→   528→  const prevValue = useRef(0)
+   529→   529→
+   530→   530→  useEffect(() => {
+   531→   531→    const start = prevValue.current
+   532→   532→    const end = value
+   533→   533→    const startTime = performance.now()
+   534→   534→
+   535→   535→    const animate = (currentTime: number) => {
+   536→   536→      const elapsed = currentTime - startTime
+   537→   537→      const progress = Math.min(elapsed / duration, 1)
+   538→   538→      // Ease out cubic
+   539→   539→      const eased = 1 - Math.pow(1 - progress, 3)
+   540→   540→      setDisplay(Math.round(start + (end - start) * eased))
+   541→   541→      if (progress < 1) requestAnimationFrame(animate)
+   542→   542→    }
+   543→   543→
+   544→   544→    requestAnimationFrame(animate)
+   545→   545→    prevValue.current = value
+   546→   546→  }, [value, duration])
+   547→   547→
+   548→   548→  return <>{formatNumberIN(display)}</>
+   549→   549→}
+   550→   550→
+   551→   551→// ─── Export CSV ────────────────────────────────────────────────
+   552→   552→function exportCsv() {
+   553→   553→  const rows = [
+   554→   554→    ['Client', 'Framework', 'Tier', 'Status', 'Subtotal (INR)', 'Discount (INR)', 'GST (INR)', 'Total (INR)', 'USD', 'Created'],
+   555→   555→  ]
+   556→   556→
+   557→   557→  // We'll fetch fresh data for export
+   558→   558→  fetch('/api/quotes?status=all')
+   559→   559→    .then((r) => r.json())
+   560→   560→    .then((res) => {
+   561→   561→      const quotes = res.data || []
+   562→   562→      for (const q of quotes) {
+   563→   563→        rows.push([
+   564→   564→          q.client?.companyName || '',
+   565→   565→          q.framework?.name || '',
+   566→   566→          q.tier?.name || '',
+   567→   567→          q.status,
+   568→   568→          String(q.subtotalInr),
+   569→   569→          String(q.discountInr),
+   570→   570→          String(q.gstAmountInr),
+   571→   571→          String(q.totalInr),
+   572→   572→          String(q.totalUsd),
+   573→   573→          new Date(q.createdAt).toLocaleDateString('en-IN'),
+   574→   574→        ])
+   575→   575→      }
+   576→   576→      const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n')
+   577→   577→      const blob = new Blob([csv], { type: 'text/csv' })
+   578→   578→      const url = URL.createObjectURL(blob)
+   579→   579→      const a = document.createElement('a')
+   580→   580→      a.href = url
+   581→   581→      a.download = `isecurify-quotes-${new Date().toISOString().split('T')[0]}.csv`
+   582→   582→      document.body.appendChild(a)
+   583→   583→      a.click()
+   584→   584→      document.body.removeChild(a)
+   585→   585→      URL.revokeObjectURL(url)
+   586→   586→    })
+   587→   587→    .catch(() => {
+   588→   588→      // fallback: ignore
+   589→   589→    })
+   590→   590→}
+   591→   591→
+   592→   592→// ─── Add Client Dialog ────────────────────────────────────────
+   593→   593→function AddClientDialog({ onClose }: { onClose: () => void }) {
+   594→   594→  const [companyName, setCompanyName] = useState('')
+   595→   595→  const [sector, setSector] = useState('')
+   596→   596→  const [companySize, setCompanySize] = useState('Mid-size')
+   597→   597→  const qc = useQueryClient()
+   598→   598→
+   599→   599→  const mutation = useMutation({
+   600→   600→    mutationFn: (body: { companyName: string; sector: string; companySize: string }) =>
+   601→   601→      api.post('/clients', body),
+   602→   602→    onSuccess: () => {
+   603→   603→      toast.success('Client added successfully')
+   604→   604→      qc.invalidateQueries({ queryKey: ['dashboard'] })
+   605→   605→      onClose()
+   606→   606→    },
+   607→   607→    onError: (e: Error) => toast.error(e.message),
+   608→   608→  })
+   609→   609→
+   610→   610→  const handleSubmit = (e: React.FormEvent) => {
+   611→   611→    e.preventDefault()
+   612→   612→    if (!companyName.trim()) return
+   613→   613→    mutation.mutate({ companyName: companyName.trim(), sector: sector.trim(), companySize })
+   614→   614→  }
+   615→   615→
+   616→   616→  return (
+   617→   617→    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+   618→   618→      <motion.div
+   619→   619→        initial={{ opacity: 0, scale: 0.95 }}
+   620→   620→        animate={{ opacity: 1, scale: 1 }}
+   621→   621→        className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6"
+   622→   622→        onClick={(e) => e.stopPropagation()}
+   623→   623→      >
+   624→   624→        <h3 className="text-base font-bold text-slate-900 mb-1">Quick Add Client</h3>
+   625→   625→        <p className="text-xs text-slate-500 mb-5">Add a new prospect to the pipeline</p>
+   626→   626→
+   627→   627→        <form onSubmit={handleSubmit} className="space-y-4">
+   628→   628→          <div>
+   629→   629→            <label className="text-xs font-medium text-slate-600">Company Name *</label>
+   630→   630→            <input
+   631→   631→              autoFocus
+   632→   632→              value={companyName}
+   633→   633→              onChange={(e) => setCompanyName(e.target.value)}
+   634→   634→              placeholder="e.g., Acme Technologies"
+   635→   635→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   636→   636→            />
+   637→   637→          </div>
+   638→   638→          <div>
+   639→   639→            <label className="text-xs font-medium text-slate-600">Sector</label>
+   640→   640→            <input
+   641→   641→              value={sector}
+   642→   642→              onChange={(e) => setSector(e.target.value)}
+   643→   643→              placeholder="e.g., IT Services"
+   644→   644→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   645→   645→            />
+   646→   646→          </div>
+   647→   647→          <div>
+   648→   648→            <label className="text-xs font-medium text-slate-600">Company Size</label>
+   649→   649→            <div className="mt-1 flex gap-2">
+   650→   650→              {['Startup', 'Mid-size', 'Enterprise'].map((size) => (
+   651→   651→                <button
+   652→   652→                  key={size}
+   653→   653→                  type="button"
+   654→   654→                  onClick={() => setCompanySize(size)}
+   655→   655→                  className={cn(
+   656→   656→                    'flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors',
+   657→   657→                    companySize === size
+   658→   658→                      ? 'border-brand-600 bg-brand-50 text-brand-800'
+   659→   659→                      : 'border-slate-200 text-slate-600 hover:bg-slate-50',
+   660→   660→                  )}
+   661→   661→                >
+   662→   662→                  {size}
+   663→   663→                </button>
+   664→   664→              ))}
+   665→   665→            </div>
+   666→   666→          </div>
+   667→   667→          <div className="flex gap-2 pt-2">
+   668→   668→            <button
+   669→   669→              type="button"
+   670→   670→              onClick={onClose}
+   671→   671→              className="flex-1 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
+   672→   672→            >
+   673→   673→              Cancel
+   674→   674→            </button>
+   675→   675→            <button
+   676→   676→              type="submit"
+   677→   677→              disabled={!companyName.trim() || mutation.isPending}
+   678→   678→              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50"
+   679→   679→            >
+   680→   680→              {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+   681→   681→              Add Client
+   682→   682→            </button>
+   683→   683→          </div>
+   684→   684→        </form>
+   685→   685→      </motion.div>
+   686→   686→    </div>
+   687→   687→  )
+   688→   688→}

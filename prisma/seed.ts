@@ -92,17 +92,17 @@ async function main() {
   const tierStartup = await db.tier.upsert({
     where: { id: 'tier-startup' },
     update: {},
-    create: { id: 'tier-startup', name: 'Startup', retainerPct: 20, sortOrder: 1 },
+    create: { id: 'tier-startup', name: 'Startup', description: '1–50 employees', retainerPct: 20, sortOrder: 1 },
   })
   const tierMidsize = await db.tier.upsert({
     where: { id: 'tier-midsize' },
     update: {},
-    create: { id: 'tier-midsize', name: 'Mid-size', retainerPct: 18, sortOrder: 2 },
+    create: { id: 'tier-midsize', name: 'Mid-size', description: '51–500 employees', retainerPct: 18, sortOrder: 2 },
   })
   const tierEnterprise = await db.tier.upsert({
     where: { id: 'tier-enterprise' },
     update: {},
-    create: { id: 'tier-enterprise', name: 'Enterprise', retainerPct: 15, sortOrder: 3 },
+    create: { id: 'tier-enterprise', name: 'Enterprise', description: '500+ employees', retainerPct: 15, sortOrder: 3 },
   })
   console.log(`  ✓ Tiers: ${tierStartup.name}, ${tierMidsize.name}, ${tierEnterprise.name}`)
 

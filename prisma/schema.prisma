@@ -101,6 +101,7 @@ model Tier {
   id          String   @id @default(cuid())
   tenantId    String?  // null = global
   name        String
+  description String?  // e.g. "1–50 employees"
   retainerPct Float    @default(0) // 20.0 / 18.0 / 15.0
   sortOrder   Int      @default(0)
   isActive    Boolean  @default(true)
@@ -253,9 +254,12 @@ model Quote {
   status               String    @default("DRAFT") // DRAFT | PENDING_REVIEW | PENDING_FINANCE | APPROVED | SENT | VIEWED | EXPIRED | REJECTED
   frameworkId          String
   tierId               String
+  billingCurrency      String    @default("INR") // INR | USD
   subtotalInr          Float     @default(0)
   discountInr          Float     @default(0)
   discountPct          Float     @default(0)
+  discountMode         String    @default("percent") // percent | fixed
+  discountFixedInr     Float     @default(0)
   discountReason       String?
   gstAmountInr         Float     @default(0)
   totalInr             Float     @default(0)
@@ -263,6 +267,8 @@ model Quote {
   usdInrRateSnapshot   Float     @default(83)
   gstRateSnapshot      Float     @default(18)
   includeRetainer      Boolean   @default(false)
+  retainerMode         String    @default("percent") // percent | fixed
+  retainerCustomInr    Float     @default(0)
   retainerAmountInr    Float     @default(0)
   internalHours        Int       @default(0)
   internalHourlyRate   Float     @default(0)

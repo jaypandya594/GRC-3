@@ -50,7 +50,10 @@ export async function POST(req: NextRequest) {
         clientId: string
         selectedFrameworkIds: string[]
         tierId: string
+        billingCurrency?: string
         includeRetainer: boolean
+        retainerMode?: string
+        retainerCustomInr?: number | null
         selectedAuditorFeeIds: string[]
         selectedAddonIds: string[]
         grcToolEnabled: boolean
@@ -60,6 +63,8 @@ export async function POST(req: NextRequest) {
         internalHours: number
         internalHourlyRate: number
         discountPct: number
+        discountMode?: string
+        discountFixedInr?: number
         discountReason: string
         validUntilDays: number
         notes: string
@@ -92,9 +97,12 @@ export async function POST(req: NextRequest) {
         tierId: selection.tierId,
         version: 1,
         status: initialStatus,
+        billingCurrency: selection.billingCurrency || 'INR',
         subtotalInr: computed.subtotalInr,
         discountInr: computed.discountInr,
-        discountPct: selection.discountPct || 0,
+        discountPct: computed.discountPct || selection.discountPct || 0,
+        discountMode: selection.discountMode || 'percent',
+        discountFixedInr: selection.discountFixedInr || 0,
         discountReason: selection.discountReason || null,
         gstAmountInr: computed.gstAmountInr,
         totalInr: computed.totalInr,
@@ -102,6 +110,8 @@ export async function POST(req: NextRequest) {
         usdInrRateSnapshot: computed.usdInrRate,
         gstRateSnapshot: computed.gstRate,
         includeRetainer: selection.includeRetainer,
+        retainerMode: selection.retainerMode || 'percent',
+        retainerCustomInr: selection.retainerCustomInr || 0,
         retainerAmountInr: computed.retainerAmountInr,
         internalHours: selection.internalHours || 0,
         internalHourlyRate: selection.internalHourlyRate || 0,
@@ -144,7 +154,10 @@ async function buildLineItems(
   selection: {
     selectedFrameworkIds: string[]
     tierId: string
+    billingCurrency?: string
     includeRetainer: boolean
+    retainerMode?: string
+    retainerCustomInr?: number | null
     selectedAuditorFeeIds: string[]
     selectedAddonIds: string[]
     grcToolEnabled: boolean
@@ -154,9 +167,11 @@ async function buildLineItems(
     internalHours: number
     internalHourlyRate: number
     discountPct: number
+    discountMode?: string
+    discountFixedInr?: number
     discountReason: string
   },
-  computed: { subtotalInr: number; discountInr: number; discountPct: number },
+  computed: { subtotalInr: number; discountInr: number; discountPct: number; discountMode?: string },
 ) {
   const lines: Array<{
     lineType: string
@@ -189,14 +204,20 @@ async function buildLineItems(
         sortOrder: sortOrder++,
       })
 
-      if (selection.includeRetainer && price.retainerFeeInr > 0) {
-        lines.push({
-          lineType: 'retainer',
-          description: `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
-          referenceId: tier.id,
-          amountInr: price.retainerFeeInr,
-          sortOrder: sortOrder++,
-        })
+      if (selection.includeRetainer) {
+        const isFixed = selection.retainerMode === 'fixed' && selection.retainerCustomInr != null && selection.retainerCustomInr > 0
+        const retainerFee = isFixed ? selection.retainerCustomInr : price.retainerFeeInr
+        if (retainerFee > 0) {
+          lines.push({
+            lineType: 'retainer',
+            description: isFixed
+              ? `Annual Retainer — ${framework.name} (Custom amount)`
+              : `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
+            referenceId: tier.id,
+            amountInr: retainerFee,
+            sortOrder: sortOrder++,
+          })
+        }
       }
     }
   }
@@ -270,9 +291,13 @@ async function buildLineItems(
 
   // Discount
   if (computed.discountInr > 0) {
+    const isFixed = selection.discountMode === 'fixed'
+    const discLabel = isFixed
+      ? `Discount (Fixed)${selection.discountReason ? ` — ${selection.discountReason}` : ''}`
+      : `Discount (${computed.discountPct}%)${selection.discountReason ? ` — ${selection.discountReason}` : ''}`
     lines.push({
       lineType: 'discount',
-      description: `Discount (${computed.discountPct}%)${selection.discountReason ? ` — ${selection.discountReason}` : ''}`,
+      description: discLabel,
       referenceId: null,
       amountInr: -computed.discountInr,
       sortOrder: sortOrder++,

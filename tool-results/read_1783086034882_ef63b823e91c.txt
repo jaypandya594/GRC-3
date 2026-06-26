@@ -1,0 +1,869 @@
+     1→/**
+     2→ * iSecurify — Quotes List + Detail views
+     3→ */
+     4→'use client'
+     5→
+     6→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     7→import { api } from '@/lib/api-client'
+     8→import { useNavStore, useAuthStore, useQuoteBuilderStore } from '@/store'
+     9→import { TopBar } from '@/components/isecurify/Shell'
+    10→import { StatusBadge, DealStageBadge, SectionCard, EmptyState } from '@/components/isecurify/Atoms'
+    11→import { formatINR, formatUSD, formatDate, formatDateTime, formatRelativeTime } from '@/lib/currency'
+    12→import { canPerformAction, getNextStatus } from '@/lib/quoteCalculator'
+    13→import { cn } from '@/lib/utils'
+    14→import { toast } from 'sonner'
+    15→import {
+    16→  Search,
+    17→  Plus,
+    18→  ArrowLeft,
+    19→  FileText,
+    20→  Loader2,
+    21→  Check,
+    22→  X,
+    23→  Send,
+    24→  RotateCcw,
+    25→  Download,
+    26→  Clock,
+    27→  TrendingUp,
+    28→  Upload,
+    29→  FileIcon,
+    30→  Trash2,
+    31→  Pencil,
+    32→} from 'lucide-react'
+    33→import { useState, useRef } from 'react'
+    34→import {
+    35→  AlertDialog,
+    36→  AlertDialogAction,
+    37→  AlertDialogCancel,
+    38→  AlertDialogContent,
+    39→  AlertDialogDescription,
+    40→  AlertDialogFooter,
+    41→  AlertDialogHeader,
+    42→  AlertDialogTitle,
+    43→} from '@/components/ui/alert-dialog'
+    44→import type { Quote, QuoteStatus, QuoteBuilderSelection } from '@/types'
+    45→
+    46→const STATUS_FILTERS: Array<{ id: string; label: string }> = [
+    47→  { id: 'all', label: 'All' },
+    48→  { id: 'DRAFT', label: 'Draft' },
+    49→  { id: 'PENDING_REVIEW', label: 'Pending Review' },
+    50→  { id: 'PENDING_FINANCE', label: 'Pending Finance' },
+    51→  { id: 'APPROVED', label: 'Approved' },
+    52→  { id: 'SENT', label: 'Sent' },
+    53→  { id: 'REJECTED', label: 'Rejected' },
+    54→]
+    55→
+    56→/** Statuses that allow editing the quote in the builder */
+    57→const EDITABLE_STATUSES = new Set<QuoteStatus>(['DRAFT', 'REJECTED'])
+    58→
+    59→async function downloadQuotePdf(id: string): Promise<void> {
+    60→  try {
+    61→    const win = window.open(`/api/quote-pdf/${id}`, '_blank')
+    62→    if (!win) {
+    63→      const res = await fetch(`/api/quote-pdf/${id}`)
+    64→      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+    65→      const blob = await res.blob()
+    66→      const blobUrl = URL.createObjectURL(blob)
+    67→      const a = document.createElement('a')
+    68→      a.style.display = 'none'
+    69→      a.href = blobUrl
+    70→      a.download = `iSecurify-Quote-${id.slice(-8).toUpperCase()}.pdf`
+    71→      document.body.appendChild(a)
+    72→      a.click()
+    73→      setTimeout(() => {
+    74→        document.body.removeChild(a)
+    75→        URL.revokeObjectURL(blobUrl)
+    76→      }, 5000)
+    77→    }
+    78→  } catch (err) {
+    79→    console.error('[PDF Download] Error:', err)
+    80→    throw err
+    81→  }
+    82→}
+    83→
+    84→// ─── Framework name helpers (uses quoteFrameworks join table) ──
+    85→
+    86→/** Get all framework names from the QuoteFramework join table, falling back to line items, then single framework */
+    87→function getFrameworkDisplayNames(quote: Quote): string[] {
+    88→  // 1. Prefer the join table
+    89→  if (quote.quoteFrameworks && quote.quoteFrameworks.length > 0) {
+    90→    return quote.quoteFrameworks
+    91→      .sort((a, b) => a.sortOrder - b.sortOrder)
+    92→      .map((qf) => qf.framework?.name || 'Unknown')
+    93→  }
+    94→  // 2. Fall back to line items
+    95→  const consultingLines = (quote.lineItems || []).filter((l) => l.lineType === 'consulting_fee')
+    96→  if (consultingLines.length > 0) {
+    97→    return consultingLines.map((l) => l.description.replace(/ — Consulting Fee.*/, '').trim())
+    98→  }
+    99→  // 3. Last resort: single framework field
+   100→  if (quote.framework?.name) return [quote.framework.name]
+   101→  return []
+   102→}
+   103→
+   104→function getFrameworkDisplayString(quote: Quote): string {
+   105→  return getFrameworkDisplayNames(quote).join(' + ') || '—'
+   106→}
+   107→
+   108→function FrameworkBadges({ quote }: { quote: Quote }) {
+   109→  const names = getFrameworkDisplayNames(quote)
+   110→  if (names.length === 0) return <span className="text-slate-400">—</span>
+   111→  if (names.length <= 2) {
+   112→    return <span className="text-slate-600">{names.join(' + ')}</span>
+   113→  }
+   114→  // Show first 2 + count for long lists
+   115→  return (
+   116→    <span className="text-slate-600">
+   117→      {names.slice(0, 2).join(' + ')} <span className="text-slate-400">+{names.length - 2} more</span>
+   118→    </span>
+   119→  )
+   120→}
+   121→
+   122→export function QuotesListView() {
+   123→  const { navigate } = useNavStore()
+   124→  const { user } = useAuthStore()
+   125→  const { loadForEdit } = useQuoteBuilderStore()
+   126→  const qc = useQueryClient()
+   127→  const [filter, setFilter] = useState('all')
+   128→  const [search, setSearch] = useState('')
+   129→  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+   130→  const [deleteTarget, setDeleteTarget] = useState<Quote | null>(null)
+   131→
+   132→  const { data: quotes, isLoading } = useQuery({
+   133→    queryKey: ['quotes', filter],
+   134→    queryFn: () => api.get<Quote[]>(`/quotes?status=${filter}`),
+   135→  })
+   136→
+   137→  const deleteMutation = useMutation({
+   138→    mutationFn: (id: string) => api.delete(`/quotes/${id}`),
+   139→    onSuccess: () => {
+   140→      toast.success('Quote deleted')
+   141→      setDeleteTarget(null)
+   142→      qc.invalidateQueries({ queryKey: ['quotes'] })
+   143→      qc.invalidateQueries({ queryKey: ['dashboard'] })
+   144→    },
+   145→    onError: () => toast.error('Failed to delete quote'),
+   146→  })
+   147→
+   148→  const handleEdit = (q: Quote) => {
+   149→    if (!q.selectionJson) {
+   150→      toast.error('Cannot edit — selection data not available (legacy quote)')
+   151→      return
+   152→    }
+   153→    try {
+   154→      const selection = JSON.parse(q.selectionJson) as QuoteBuilderSelection
+   155→      // Ensure arrays are valid (defensive)
+   156→      selection.selectedFrameworkIds = Array.isArray(selection.selectedFrameworkIds) ? selection.selectedFrameworkIds : []
+   157→      selection.selectedAuditorFeeIds = Array.isArray(selection.selectedAuditorFeeIds) ? selection.selectedAuditorFeeIds : []
+   158→      selection.selectedAddonIds = Array.isArray(selection.selectedAddonIds) ? selection.selectedAddonIds : []
+   159→      loadForEdit(selection, q.id)
+   160→      navigate('quote-builder')
+   161→    } catch {
+   162→      toast.error('Failed to parse quote data for editing')
+   163→    }
+   164→  }
+   165→
+   166→  // Search across framework names from the join table + client name
+   167→  const filtered = (quotes || []).filter((q) => {
+   168→    if (!search) return true
+   169→    const s = search.toLowerCase()
+   170→    return (
+   171→      q.client?.companyName?.toLowerCase().includes(s) ||
+   172→      getFrameworkDisplayNames(q).some((n) => n.toLowerCase().includes(s))
+   173→    )
+   174→  })
+   175→
+   176→  return (
+   177→    <>
+   178→      <TopBar
+   179→        title="Quotes"
+   180→        subtitle="All compliance proposals"
+   181→        action={
+   182→          <button
+   183→            onClick={() => navigate('quote-builder')}
+   184→            className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
+   185→          >
+   186→            <Plus className="h-4 w-4" /> New Quote
+   187→          </button>
+   188→        }
+   189→      />
+   190→
+   191→      <div className="p-4 md:p-8 space-y-4">
+   192→        {/* Filters */}
+   193→        <div className="flex flex-col sm:flex-row gap-3">
+   194→          <div className="relative flex-1">
+   195→            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+   196→            <input
+   197→              value={search}
+   198→              onChange={(e) => setSearch(e.target.value)}
+   199→              placeholder="Search by client or framework..."
+   200→              className="w-full rounded-lg border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   201→            />
+   202→          </div>
+   203→          <div className="flex gap-1 overflow-x-auto pb-1">
+   204→            {STATUS_FILTERS.map((f) => (
+   205→              <button
+   206→                key={f.id}
+   207→                onClick={() => setFilter(f.id)}
+   208→                className={cn(
+   209→                  'shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
+   210→                  filter === f.id
+   211→                    ? 'bg-brand-700 text-white'
+   212→                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50',
+   213→                )}
+   214→              >
+   215→                {f.label}
+   216→              </button>
+   217→            ))}
+   218→          </div>
+   219→        </div>
+   220→
+   221→        {/* List */}
+   222→        {isLoading ? (
+   223→          <div className="flex items-center justify-center py-20">
+   224→            <Loader2 className="h-6 w-6 animate-spin text-brand-600" />
+   225→          </div>
+   226→        ) : filtered.length === 0 ? (
+   227→          <SectionCard>
+   228→            <EmptyState
+   229→              icon={<FileText className="h-10 w-10" />}
+   230→              title="No quotes found"
+   231→              description="Create your first quote using the Quote Builder wizard."
+   232→              action={
+   233→                <button
+   234→                  onClick={() => navigate('quote-builder')}
+   235→                  className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
+   236→                >
+   237→                  <Plus className="h-4 w-4" /> New Quote
+   238→                </button>
+   239→              }
+   240→            />
+   241→          </SectionCard>
+   242→        ) : (
+   243→          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+   244→            <div className="overflow-x-auto">
+   245→              <table className="w-full text-sm">
+   246→                <thead className="bg-slate-50 border-b border-slate-200">
+   247→                  <tr>
+   248→                    <th className="text-left px-4 py-3 font-semibold text-slate-600">Client</th>
+   249→                    <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden md:table-cell">Framework</th>
+   250→                    <th className="text-left px-4 py-3 font-semibold text-slate-600">Status</th>
+   251→                    <th className="text-right px-4 py-3 font-semibold text-slate-600">Total</th>
+   252→                    <th className="text-left px-4 py-3 font-semibold text-slate-600 hidden lg:table-cell">Created</th>
+   253→                    <th className="px-4 py-3 w-20"></th>
+   254→                  </tr>
+   255→                </thead>
+   256→                <tbody className="divide-y divide-slate-100">
+   257→                  {filtered.map((q) => (
+   258→                    <tr
+   259→                      key={q.id}
+   260→                      onClick={() => navigate('quotes', { id: q.id })}
+   261→                      className="hover:bg-slate-50 cursor-pointer transition-colors"
+   262→                    >
+   263→                      <td className="px-4 py-3">
+   264→                        <p className="font-medium text-slate-900">{q.client?.companyName || 'Unknown'}</p>
+   265→                        <p className="text-xs text-slate-500">v{q.version}</p>
+   266→                      </td>
+   267→                      <td className="px-4 py-3 hidden md:table-cell">
+   268→                        <FrameworkBadges quote={q} />
+   269→                      </td>
+   270→                      <td className="px-4 py-3"><StatusBadge status={q.status} /></td>
+   271→                      <td className="px-4 py-3 text-right">
+   272→                        <p className="font-bold text-slate-900">{formatINR(q.totalInr)}</p>
+   273→                        <p className="text-xs text-slate-500">{formatUSD(q.totalUsd)}</p>
+   274→                      </td>
+   275→                      <td className="px-4 py-3 hidden lg:table-cell text-slate-500 text-xs">
+   276→                        {formatRelativeTime(q.createdAt)}
+   277→                      </td>
+   278→                      <td className="px-4 py-3">
+   279→                        <div className="flex items-center gap-1">
+   280→                          {/* Edit button — only for editable statuses */}
+   281→                          {EDITABLE_STATUSES.has(q.status as QuoteStatus) && q.selectionJson && (
+   282→                            <button
+   283→                              onClick={(e) => {
+   284→                                e.stopPropagation()
+   285→                                handleEdit(q)
+   286→                              }}
+   287→                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-slate-400 hover:text-brand-700 hover:bg-brand-50 transition-colors"
+   288→                              title="Edit Quote"
+   289→                            >
+   290→                              <Pencil className="h-4 w-4" />
+   291→                            </button>
+   292→                          )}
+   293→                          <button
+   294→                            onClick={(e) => {
+   295→                              e.stopPropagation()
+   296→                              setDownloadingId(q.id)
+   297→                              downloadQuotePdf(q.id)
+   298→                                .then(() => toast.success('PDF download started'))
+   299→                                .catch(() => toast.error('Download failed — try again'))
+   300→                                .finally(() => setDownloadingId(null))
+   301→                            }}
+   302→                            disabled={downloadingId === q.id}
+   303→                            className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-slate-400 hover:text-brand-700 hover:bg-brand-50 transition-colors disabled:opacity-50"
+   304→                            title="Download PDF"
+   305→                          >
+   306→                            {downloadingId === q.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+   307→                          </button>
+   308→                          <button
+   309→                            onClick={(e) => {
+   310→                              e.stopPropagation()
+   311→                              setDeleteTarget(q)
+   312→                            }}
+   313→                            disabled={user?.role !== 'super_admin'}
+   314→                            className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+   315→                            title="Delete Quote"
+   316→                          >
+   317→                            <Trash2 className="h-4 w-4" />
+   318→                          </button>
+   319→                        </div>
+   320→                      </td>
+   321→                    </tr>
+   322→                  ))}
+   323→                </tbody>
+   324→              </table>
+   325→            </div>
+   326→          </div>
+   327→        )}
+   328→      </div>
+   329→
+   330→      {/* Delete Confirmation */}
+   331→      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+   332→        <AlertDialogContent>
+   333→          <AlertDialogHeader>
+   334→            <AlertDialogTitle>Delete Quote?</AlertDialogTitle>
+   335→            <AlertDialogDescription>
+   336→              This will permanently delete the quote for <strong>{deleteTarget?.client?.companyName || 'this client'}</strong> ({getFrameworkDisplayString(deleteTarget!)}). This action cannot be undone.
+   337→            </AlertDialogDescription>
+   338→          </AlertDialogHeader>
+   339→          <AlertDialogFooter>
+   340→            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   341→            <AlertDialogAction
+   342→              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+   343→              disabled={deleteMutation.isPending}
+   344→              className="bg-rose-600 hover:bg-rose-700 text-white"
+   345→            >
+   346→              {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+   347→              Delete
+   348→            </AlertDialogAction>
+   349→          </AlertDialogFooter>
+   350→        </AlertDialogContent>
+   351→      </AlertDialog>
+   352→    </>
+   353→  )
+   354→}
+   355→
+   356→// ─── Quote Detail ──────────────────────────────────────────────
+   357→export function QuoteDetailView({ quoteId }: { quoteId: string }) {
+   358→  const { navigate } = useNavStore()
+   359→  const { user } = useAuthStore()
+   360→  const { loadForEdit } = useQuoteBuilderStore()
+   361→  const qc = useQueryClient()
+   362→  const [comment, setComment] = useState('')
+   363→  const [overrideDiscount, setOverrideDiscount] = useState<number | null>(null)
+   364→  const [downloading, setDownloading] = useState(false)
+   365→  const [uploading, setUploading] = useState(false)
+   366→  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+   367→  const fileInputRef = useRef<HTMLInputElement>(null)
+   368→
+   369→  const deleteMutation = useMutation({
+   370→    mutationFn: () => api.delete(`/quotes/${quoteId}`),
+   371→    onSuccess: () => {
+   372→      toast.success('Quote deleted')
+   373→      qc.invalidateQueries({ queryKey: ['quotes'] })
+   374→      qc.invalidateQueries({ queryKey: ['dashboard'] })
+   375→      navigate('quotes')
+   376→    },
+   377→    onError: () => toast.error('Failed to delete quote'),
+   378→  })
+   379→
+   380→  const handleDownloadPdf = async () => {
+   381→    setDownloading(true)
+   382→    try {
+   383→      const win = window.open(`/api/quote-pdf/${quoteId}`, '_blank')
+   384→      if (!win) {
+   385→        const res = await fetch(`/api/quote-pdf/${quoteId}`)
+   386→        if (!res.ok) throw new Error(`Server returned ${res.status}`)
+   387→        const blob = await res.blob()
+   388→        const blobUrl = URL.createObjectURL(blob)
+   389→        const a = document.createElement('a')
+   390→        a.style.display = 'none'
+   391→        a.href = blobUrl
+   392→        a.download = `iSecurify-Quote-${quoteId.slice(-8).toUpperCase()}.pdf`
+   393→        document.body.appendChild(a)
+   394→        a.click()
+   395→        setTimeout(() => {
+   396→          document.body.removeChild(a)
+   397→          URL.revokeObjectURL(blobUrl)
+   398→        }, 5000)
+   399→      }
+   400→      toast.success('PDF download started')
+   401→    } catch (err) {
+   402→      console.error('[PDF Download] Error:', err)
+   403→      toast.error('Failed to download PDF — please try again')
+   404→    } finally {
+   405→      setDownloading(false)
+   406→    }
+   407→  }
+   408→
+   409→  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+   410→    const file = e.target.files?.[0]
+   411→    if (!file) return
+   412→    setUploading(true)
+   413→    try {
+   414→      const fd = new FormData()
+   415→      fd.append('file', file)
+   416→      fd.append('entity', 'quote')
+   417→      fd.append('entityId', quoteId)
+   418→      const res = await fetch('/api/upload', { method: 'POST', body: fd })
+   419→      if (!res.ok) throw new Error('Upload failed')
+   420→      toast.success(`${file.name} uploaded successfully`)
+   421→      if (fileInputRef.current) fileInputRef.current.value = ''
+   422→    } catch {
+   423→      toast.error('Failed to upload file')
+   424→    } finally {
+   425→      setUploading(false)
+   426→    }
+   427→  }
+   428→
+   429→  const { data: quote, isLoading } = useQuery({
+   430→    queryKey: ['quote', quoteId],
+   431→    queryFn: () => api.get<Quote>(`/quotes/${quoteId}`),
+   432→    enabled: !!quoteId,
+   433→  })
+   434→
+   435→  const actionMutation = useMutation({
+   436→    mutationFn: (vars: { action: string; comment?: string; newDiscountPct?: number }) =>
+   437→      api.post(`/quotes/${quoteId}/action`, vars),
+   438→    onSuccess: () => {
+   439→      toast.success('Action completed')
+   440→      setComment('')
+   441→      setOverrideDiscount(null)
+   442→      qc.invalidateQueries({ queryKey: ['quote', quoteId] })
+   443→      qc.invalidateQueries({ queryKey: ['quotes'] })
+   444→      qc.invalidateQueries({ queryKey: ['dashboard'] })
+   445→    },
+   446→    onError: (e: Error) => toast.error(e.message),
+   447→  })
+   448→
+   449→  const handleEdit = () => {
+   450→    if (!quote?.selectionJson) {
+   451→      toast.error('Cannot edit — selection data not available (legacy quote)')
+   452→      return
+   453→    }
+   454→    try {
+   455→      const selection = JSON.parse(quote.selectionJson) as QuoteBuilderSelection
+   456→      selection.selectedFrameworkIds = Array.isArray(selection.selectedFrameworkIds) ? selection.selectedFrameworkIds : []
+   457→      selection.selectedAuditorFeeIds = Array.isArray(selection.selectedAuditorFeeIds) ? selection.selectedAuditorFeeIds : []
+   458→      selection.selectedAddonIds = Array.isArray(selection.selectedAddonIds) ? selection.selectedAddonIds : []
+   459→      loadForEdit(selection, quote.id)
+   460→      navigate('quote-builder')
+   461→    } catch {
+   462→      toast.error('Failed to parse quote data for editing')
+   463→    }
+   464→  }
+   465→
+   466→  if (isLoading || !quote) {
+   467→    return (
+   468→      <>
+   469→        <TopBar title="Quote" />
+   470→        <div className="flex items-center justify-center py-20">
+   471→          <Loader2 className="h-6 w-6 animate-spin text-brand-600" />
+   472→        </div>
+   473→      </>
+   474→    )
+   475→  }
+   476→
+   477→  // Determine available actions based on actual user role (v2 spec)
+   478→  const role = user?.role ?? 'sales_executive'
+   479→  const status = quote.status as QuoteStatus
+   480→  const canEdit = EDITABLE_STATUSES.has(status) && !!quote.selectionJson
+   481→
+   482→  const availableActions: Array<{ action: string; label: string; icon: React.ReactNode; variant: 'primary' | 'danger' | 'neutral' }> = []
+   483→
+   484→  if (canPerformAction(status, 'submit', role)) {
+   485→    availableActions.push({ action: 'submit', label: 'Submit for Review', icon: <Send className="h-4 w-4" />, variant: 'primary' })
+   486→  }
+   487→  if (canPerformAction(status, 'approve', role)) {
+   488→    availableActions.push({ action: 'approve', label: 'Approve', icon: <Check className="h-4 w-4" />, variant: 'primary' })
+   489→  }
+   490→  if (canPerformAction(status, 'reject', role)) {
+   491→    availableActions.push({ action: 'reject', label: 'Reject', icon: <X className="h-4 w-4" />, variant: 'danger' })
+   492→  }
+   493→  if (canPerformAction(status, 'override', role)) {
+   494→    availableActions.push({ action: 'override', label: 'Override & Approve', icon: <TrendingUp className="h-4 w-4" />, variant: 'primary' })
+   495→  }
+   496→  if (canPerformAction(status, 'send', role)) {
+   497→    availableActions.push({ action: 'send', label: 'Send to Client', icon: <Send className="h-4 w-4" />, variant: 'primary' })
+   498→  }
+   499→  if (canPerformAction(status, 'recall', role)) {
+   500→    availableActions.push({ action: 'recall', label: 'Recall', icon: <RotateCcw className="h-4 w-4" />, variant: 'neutral' })
+   501→  }
+   502→
+   503→  const lineItems = quote.lineItems || []
+   504→  const billedLines = lineItems.filter((l) => l.lineType !== 'internal_time')
+   505→  const internalLines = lineItems.filter((l) => l.lineType === 'internal_time')
+   506→
+   507→  const fwNames = getFrameworkDisplayNames(quote)
+   508→  const fwDisplay = fwNames.join(', ')
+   509→  const fwDisplayShort = fwNames.length > 3
+   510→    ? fwNames.slice(0, 3).join(', ') + ` +${fwNames.length - 3} more`
+   511→    : fwDisplay
+   512→
+   513→  return (
+   514→    <>
+   515→      <TopBar
+   516→        title={`Quote — ${quote.client?.companyName || 'Unknown'}`}
+   517→        subtitle={buildQuoteSubtitle(quote, fwNames)}
+   518→        action={
+   519→          <button
+   520→            onClick={() => navigate('quotes')}
+   521→            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+   522→          >
+   523→            <ArrowLeft className="h-4 w-4" /> Back
+   524→          </button>
+   525→        }
+   526→      />
+   527→
+   528→      <div className="p-4 md:p-8 grid grid-cols-1 lg:grid-cols-3 gap-6">
+   529→        {/* Left: line items */}
+   530→        <div className="lg:col-span-2 space-y-6">
+   531→          {/* Quote meta */}
+   532→          <div className="rounded-xl border border-slate-200 bg-white p-5">
+   533→            <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+   534→              <div>
+   535→                <div className="flex items-center gap-2 mb-1">
+   536→                  <h3 className="text-base font-bold text-slate-900">{quote.client?.companyName}</h3>
+   537→                  <StatusBadge status={quote.status} />
+   538→                </div>
+   539→                <p className="text-xs text-slate-500">
+   540→                  {quote.client?.sector} • {quote.client?.companySize} • {quote.client?.country}
+   541→                </p>
+   542→              </div>
+   543→              <div className="text-right">
+   544→                <p className="text-xs text-slate-500">Quote ID</p>
+   545→                <p className="text-xs font-mono text-slate-700">{quote.id.slice(-8).toUpperCase()}</p>
+   546→              </div>
+   547→            </div>
+   548→            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+   549→              <Meta label="Framework(s)" value={fwDisplayShort} />
+   550→              <Meta label="Tier" value={quote.tier?.name || '—'} />
+   551→              <Meta label="Valid Until" value={formatDate(quote.validUntil)} />
+   552→              <Meta label="Created" value={formatDate(quote.createdAt)} />
+   553→            </div>
+   554→          </div>
+   555→
+   556→          {/* Line items */}
+   557→          <SectionCard title="Line Items" description={`${billedLines.length} billed items`}>
+   558→            <div className="space-y-2">
+   559→              {billedLines.map((line) => (
+   560→                <div key={line.id} className="flex items-center justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+   561→                  <div className="flex items-start gap-3 min-w-0">
+   562→                    <LineTypeIcon type={line.lineType} />
+   563→                    <div className="min-w-0">
+   564→                      <p className="text-sm font-medium text-slate-900">{line.description}</p>
+   565→                      <p className="text-xs text-slate-500 capitalize">{line.lineType.replace(/_/g, ' ')}</p>
+   566→                    </div>
+   567→                  </div>
+   568→                  <span className={cn(
+   569→                    'text-sm font-semibold tabular-nums shrink-0',
+   570→                    line.amountInr < 0 ? 'text-rose-600' : 'text-slate-900',
+   571→                  )}>
+   572→                    {line.amountInr < 0 ? '-' : ''}{formatINR(Math.abs(line.amountInr))}
+   573→                  </span>
+   574→                </div>
+   575→              ))}
+   576→            </div>
+   577→
+   578→            {/* Totals */}
+   579→            <div className="mt-4 pt-4 border-t border-slate-200 space-y-1.5">
+   580→              <div className="flex justify-between text-sm">
+   581→                <span className="text-slate-600">Subtotal</span>
+   582→                <span className="font-medium text-slate-900">{formatINR(quote.subtotalInr)}</span>
+   583→              </div>
+   584→              {quote.discountInr > 0 && (
+   585→                <div className="flex justify-between text-sm">
+   586→                  <span className="text-rose-600">Discount ({quote.discountPct}%) {quote.discountReason ? `(${quote.discountReason})` : ''}</span>
+   587→                  <span className="font-medium text-rose-600">-{formatINR(quote.discountInr)}</span>
+   588→                </div>
+   589→              )}
+   590→              <div className="flex justify-between text-sm">
+   591→                <span className="text-slate-600">GST @ {quote.gstRateSnapshot}%</span>
+   592→                <span className="font-medium text-slate-900">{formatINR(quote.gstAmountInr)}</span>
+   593→              </div>
+   594→              <div className="flex justify-between items-baseline pt-2 border-t border-slate-200">
+   595→                <span className="text-sm font-bold text-slate-900">Grand Total</span>
+   596→                <div className="text-right">
+   597→                  <p className="text-xl font-bold text-brand-700">{formatINR(quote.totalInr)}</p>
+   598→                  <p className="text-xs text-slate-500">{formatUSD(quote.totalUsd)} @ ₹{quote.usdInrRateSnapshot}</p>
+   599→                </div>
+   600→              </div>
+   601→            </div>
+   602→
+   603→            {/* Internal time (advisory) */}
+   604→            {internalLines.length > 0 && (
+   605→              <div className="mt-4 rounded-lg bg-slate-50 border border-slate-200 p-3">
+   606→                <p className="text-xs font-semibold text-slate-600 mb-1">Advisory (not billed)</p>
+   607→                {internalLines.map((line) => (
+   608→                  <div key={line.id} className="flex justify-between text-xs text-slate-500 italic">
+   609→                    <span>{line.description}</span>
+   610→                    <span className="tabular-nums">{formatINR(line.amountInr)}</span>
+   611→                  </div>
+   612→                ))}
+   613→              </div>
+   614→            )}
+   615→          </SectionCard>
+   616→
+   617→          {/* Approval timeline */}
+   618→          <SectionCard title="Approval Timeline" description="Audit trail of every state transition">
+   619→            {quote.approvals && quote.approvals.length > 0 ? (
+   620→              <div className="space-y-3">
+   621→                {quote.approvals.map((a, i) => (
+   622→                  <div key={a.id} className="flex gap-3">
+   623→                    <div className="flex flex-col items-center">
+   624→                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-brand-700 text-xs font-bold">
+   625→                        {i + 1}
+   626→                      </span>
+   627→                      {i < (quote.approvals!.length - 1) && <span className="w-px flex-1 bg-slate-200 my-1" />}
+   628→                    </div>
+   629→                    <div className="flex-1 pb-3">
+   630→                      <div className="flex items-center gap-2 flex-wrap">
+   631→                        <span className="text-sm font-medium text-slate-900 capitalize">{a.action}</span>
+   632→                        <span className="text-xs text-slate-500">by {a.actor?.name || 'System'}</span>
+   633→                        <span className="text-xs text-slate-400">• {formatDateTime(a.createdAt)}</span>
+   634→                      </div>
+   635→                      {a.comment && <p className="text-xs text-slate-600 mt-0.5 italic">"{a.comment}"</p>}
+   636→                      {a.amountBefore != null && a.amountAfter != null && a.amountBefore !== a.amountAfter && (
+   637→                        <p className="text-xs text-amber-600 mt-0.5">
+   638→                          Amount: {formatINR(a.amountBefore!)} → {formatINR(a.amountAfter!)}
+   639→                        </p>
+   640→                      )}
+   641→                    </div>
+   642→                  </div>
+   643→                ))}
+   644→              </div>
+   645→            ) : (
+   646→              <p className="text-sm text-slate-400 py-4 text-center">No approval actions yet</p>
+   647→            )}
+   648→          </SectionCard>
+   649→        </div>
+   650→
+   651→        {/* Right: actions */}
+   652→        <div className="space-y-6">
+   653→          {/* Edit Quote button */}
+   654→          {canEdit && (
+   655→            <button
+   656→              onClick={handleEdit}
+   657→              className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-semibold text-brand-700 hover:bg-brand-100 transition-colors"
+   658→            >
+   659→              <Pencil className="h-4 w-4" />
+   660→              Edit Quote
+   661→            </button>
+   662→          )}
+   663→
+   664→          {/* Actions */}
+   665→          <SectionCard title="Actions" description={`Current status: ${quote.status.replace(/_/g, ' ')}`}>
+   666→            <div className="space-y-2">
+   667→              {availableActions.length === 0 ? (
+   668→                <p className="text-sm text-slate-400 py-4 text-center">
+   669→                  No actions available in current status
+   670→                </p>
+   671→              ) : (
+   672→                availableActions.map((act) => (
+   673→                  <button
+   674→                    key={act.action}
+   675→                    onClick={() => {
+   676→                      if (act.action === 'override' && overrideDiscount === null) {
+   677→                        setOverrideDiscount(quote.discountPct || 0)
+   678→                        toast.info('Set the discount percentage, then confirm override')
+   679→                        return
+   680→                      }
+   681→                      actionMutation.mutate({
+   682→                        action: act.action,
+   683→                        comment: comment || undefined,
+   684→                        newDiscountPct: act.action === 'override' ? overrideDiscount ?? undefined : undefined,
+   685→                      })
+   686→                    }}
+   687→                    disabled={actionMutation.isPending}
+   688→                    className={cn(
+   689→                      'w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:opacity-50',
+   690→                      act.variant === 'primary' && 'bg-brand-700 text-white hover:bg-brand-800',
+   691→                      act.variant === 'danger' && 'bg-rose-600 text-white hover:bg-rose-700',
+   692→                      act.variant === 'neutral' && 'border border-slate-200 text-slate-700 hover:bg-slate-50',
+   693→                    )}
+   694→                  >
+   695→                    {act.icon} {act.label}
+   696→                  </button>
+   697→                ))
+   698→              )}
+   699→
+   700→              {/* Override discount input */}
+   701→              {overrideDiscount !== null && (
+   702→                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+   703→                  <label className="text-xs font-medium text-amber-800">Override discount (%)</label>
+   704→                  <input
+   705→                    type="number"
+   706→                    value={overrideDiscount}
+   707→                    onChange={(e) => setOverrideDiscount(parseFloat(e.target.value) || 0)}
+   708→                    max="100"
+   709→                    step="0.5"
+   710→                    className="w-full rounded border border-amber-300 px-2 py-1.5 text-sm"
+   711→                  />
+   712→                  <div className="flex gap-2">
+   713→                    <button
+   714→                      onClick={() => actionMutation.mutate({
+   715→                        action: 'override',
+   716→                        comment: comment || undefined,
+   717→                        newDiscountPct: overrideDiscount,
+   718→                      })}
+   719→                      disabled={actionMutation.isPending}
+   720→                      className="flex-1 rounded bg-amber-600 text-white px-3 py-1.5 text-xs font-semibold hover:bg-amber-700"
+   721→                    >
+   722→                      Confirm Override
+   723→                    </button>
+   724→                    <button
+   725→                      onClick={() => setOverrideDiscount(null)}
+   726→                      className="rounded border border-slate-200 px-3 py-1.5 text-xs"
+   727→                    >
+   728→                      Cancel
+   729→                    </button>
+   730→                  </div>
+   731→                </div>
+   732→              )}
+   733→            </div>
+   734→
+   735→            {/* Comment */}
+   736→            <div className="mt-3">
+   737→              <label className="text-xs font-medium text-slate-600">Comment (optional)</label>
+   738→              <textarea
+   739→                value={comment}
+   740→                onChange={(e) => setComment(e.target.value)}
+   741→                rows={2}
+   742→                placeholder="Add a note for the audit trail..."
+   743→                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   744→              />
+   745→            </div>
+   746→          </SectionCard>
+   747→
+   748→          {/* Payment terms */}
+   749→          <SectionCard title="Payment Terms">
+   750→            <div className="space-y-2 text-sm">
+   751→              <div className="flex justify-between">
+   752→                <span className="text-slate-600">Advance (40%)</span>
+   753→                <span className="font-medium text-slate-900">{formatINR(quote.totalInr * 0.4)}</span>
+   754→              </div>
+   755→              <div className="flex justify-between">
+   756→                <span className="text-slate-600">Midway (40%)</span>
+   757→                <span className="font-medium text-slate-900">{formatINR(quote.totalInr * 0.4)}</span>
+   758→              </div>
+   759→              <div className="flex justify-between">
+   760→                <span className="text-slate-600">On Completion (20%)</span>
+   761→                <span className="font-medium text-slate-900">{formatINR(quote.totalInr * 0.2)}</span>
+   762→              </div>
+   763→              <div className="pt-2 border-t border-slate-200 text-xs text-slate-500">
+   764→                <Clock className="inline h-3 w-3 mr-1" />
+   765→                Valid until {formatDate(quote.validUntil)}
+   766→              </div>
+   767→            </div>
+   768→          </SectionCard>
+   769→
+   770→          {/* Download PDF */}
+   771→          <button
+   772→            onClick={handleDownloadPdf}
+   773→            disabled={downloading}
+   774→            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-50"
+   775→          >
+   776→            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+   777→            {downloading ? 'Generating...' : 'Download PDF'}
+   778→          </button>
+   779→
+   780→          {/* Delete Quote — super_admin only per v2 spec */}
+   781→          {role === 'super_admin' && (
+   782→          <button
+   783→            onClick={() => setShowDeleteConfirm(true)}
+   784→            className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition-colors"
+   785→          >
+   786→            <Trash2 className="h-4 w-4" />
+   787→            Delete Quote
+   788→          </button>
+   789→          )}
+   790→
+   791→          {/* Delete Confirmation Dialog */}
+   792→          <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+   793→            <AlertDialogContent>
+   794→              <AlertDialogHeader>
+   795→                <AlertDialogTitle>Delete this Quote?</AlertDialogTitle>
+   796→                <AlertDialogDescription>
+   797→                  This will permanently delete this quote and all its line items. This action cannot be undone.
+   798→                </AlertDialogDescription>
+   799→              </AlertDialogHeader>
+   800→              <AlertDialogFooter>
+   801→                <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+   802→                <AlertDialogAction
+   803→                  onClick={() => deleteMutation.mutate()}
+   804→                  disabled={deleteMutation.isPending}
+   805→                  className="bg-rose-600 hover:bg-rose-700 text-white"
+   806→                >
+   807→                  {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
+   808→                  Delete
+   809→                </AlertDialogAction>
+   810→              </AlertDialogFooter>
+   811→            </AlertDialogContent>
+   812→          </AlertDialog>
+   813→
+   814→          {/* Upload Document */}
+   815→          <SectionCard title="Upload Document" description="Attach supporting files">
+   816→            <div className="space-y-3">
+   817→              <div className="relative">
+   818→                <input
+   819→                  ref={fileInputRef}
+   820→                  type="file"
+   821→                  accept=".pdf,.doc,.docx,.xls,.xlsx"
+   822→                  onChange={handleFileUpload}
+   823→                  disabled={uploading}
+   824→                  className="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-brand-50 file:text-brand-700 hover:file:bg-brand-100 disabled:opacity-50"
+   825→                />
+   826→                {uploading && (
+   827→                  <div className="absolute inset-0 flex items-center justify-center bg-white/60 rounded-lg">
+   828→                    <Loader2 className="h-5 w-5 animate-spin text-brand-600" />
+   829→                  </div>
+   830→                )}
+   831→              </div>
+   832→              <p className="text-xs text-slate-400">Accepted: PDF, DOC, DOCX, XLS, XLSX</p>
+   833→            </div>
+   834→          </SectionCard>
+   835→        </div>
+   836→      </div>
+   837→    </>
+   838→  )
+   839→}
+   840→
+   841→// ── Helpers ────────────────────────────────────────────────────
+   842→
+   843→function buildQuoteSubtitle(quote: Quote, fwNames: string[]): string {
+   844→  const fwDisplay = fwNames.join(' + ')
+   845→  const fwShort = fwDisplay.length > 50 ? fwDisplay.slice(0, 47) + '...' : fwDisplay
+   846→  return `${fwShort} • ${quote.tier?.name || '—'} • v${quote.version}`
+   847→}
+   848→
+   849→function Meta({ label, value }: { label: string; value: string }) {
+   850→  return (
+   851→    <div>
+   852→      <p className="text-xs text-slate-500">{label}</p>
+   853→      <p className="text-sm font-medium text-slate-900 truncate">{value}</p>
+   854→    </div>
+   855→  )
+   856→}
+   857→
+   858→function LineTypeIcon({ type }: { type: string }) {
+   859→  const icons: Record<string, React.ReactNode> = {
+   860→    consulting_fee: <FileText className="h-4 w-4 text-brand-600" />,
+   861→    auditor_fee: <Check className="h-4 w-4 text-violet-600" />,
+   862→    addon_service: <Plus className="h-4 w-4 text-amber-600" />,
+   863→    grc_tool: <TrendingUp className="h-4 w-4 text-cyan-600" />,
+   864→    dpo_vciso: <Clock className="h-4 w-4 text-rose-600" />,
+   865→    retainer: <RotateCcw className="h-4 w-4 text-slate-600" />,
+   866→    discount: <X className="h-4 w-4 text-rose-600" />,
+   867→  }
+   868→  return <span className="mt-0.5 shrink-0">{icons[type] || <FileText className="h-4 w-4 text-slate-400" />}</span>
+   869→}

@@ -353,11 +353,11 @@ function TiersSection({ tiers }: { tiers: Tier[] }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<Tier | null>(null)
-  const [form, setForm] = useState({ name: '', retainerPct: 0, sortOrder: 0, isActive: true })
+  const [form, setForm] = useState({ name: '', description: '', retainerPct: 0, sortOrder: 0, isActive: true })
 
   const resetForm = useCallback((t?: Tier) => {
-    if (t) setForm({ name: t.name, retainerPct: t.retainerPct, sortOrder: t.sortOrder, isActive: t.isActive })
-    else setForm({ name: '', retainerPct: 0, sortOrder: 0, isActive: true })
+    if (t) setForm({ name: t.name, description: t.description ?? '', retainerPct: t.retainerPct, sortOrder: t.sortOrder, isActive: t.isActive })
+    else setForm({ name: '', description: '', retainerPct: 0, sortOrder: 0, isActive: true })
   }, [])
 
   const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
@@ -401,6 +401,7 @@ function TiersSection({ tiers }: { tiers: Tier[] }) {
               <DeleteConfirm label={tier.name} onConfirm={() => deleteMutation.mutate(tier.id)} />
             </div>
             <p className="text-sm font-bold text-slate-900">{tier.name}</p>
+            {tier.description && <p className="text-xs text-slate-500 mt-0.5">{tier.description}</p>}
             <p className="text-2xl font-bold text-brand-700 mt-1">{tier.retainerPct}%</p>
             <p className="text-xs text-slate-500 mt-0.5">annual retainer</p>
             {!tier.isActive && <span className="inline-block mt-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500">Inactive</span>}
@@ -417,6 +418,9 @@ function TiersSection({ tiers }: { tiers: Tier[] }) {
           <div className="space-y-4 pt-2">
             <FormField label="Name">
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Mid-size" />
+            </FormField>
+            <FormField label="Description">
+              <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder='e.g. "1–50 employees"' />
             </FormField>
             <FormField label="Retainer %">
               <Input type="number" step="0.1" value={form.retainerPct} onChange={(e) => setForm({ ...form, retainerPct: parseFloat(e.target.value) || 0 })} />
@@ -449,14 +453,26 @@ function PricesSection({ prices, frameworks, tiers }: { prices: FrameworkPrice[]
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<FrameworkPrice | null>(null)
   const [form, setForm] = useState({ frameworkId: '', tierId: '', projectFeeInr: 0, retainerFeeInr: 0 })
+  const [cellTarget, setCellTarget] = useState<{ frameworkId: string; tierId: string } | null>(null)
 
-  const resetForm = useCallback((p?: FrameworkPrice) => {
+  const resetForm = useCallback((p?: FrameworkPrice, fwId?: string, tId?: string) => {
     if (p) setForm({ frameworkId: p.frameworkId, tierId: p.tierId, projectFeeInr: p.projectFeeInr, retainerFeeInr: p.retainerFeeInr })
-    else setForm({ frameworkId: '', tierId: '', projectFeeInr: 0, retainerFeeInr: 0 })
+    else setForm({ frameworkId: fwId || '', tierId: tId || '', projectFeeInr: 0, retainerFeeInr: 0 })
   }, [])
 
-  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
-  const openEdit = (p: FrameworkPrice) => { resetForm(p); setEditing(p); setOpen(true) }
+  const openAdd = () => { resetForm(); setEditing(null); setCellTarget(null); setOpen(true) }
+  const openEdit = (p: FrameworkPrice) => { resetForm(p); setEditing(p); setCellTarget({ frameworkId: p.frameworkId, tierId: p.tierId }); setOpen(true) }
+  const openCell = (fwId: string, tId: string, price?: FrameworkPrice) => {
+    if (price) {
+      resetForm(price)
+      setEditing(price)
+    } else {
+      resetForm(undefined, fwId, tId)
+      setEditing(null)
+    }
+    setCellTarget({ frameworkId: fwId, tierId: tId })
+    setOpen(true)
+  }
 
   const addMutation = useMutation({
     mutationFn: (body: typeof form) => api.post<FrameworkPrice>('/admin/framework-prices', body),
@@ -519,21 +535,18 @@ function PricesSection({ prices, frameworks, tiers }: { prices: FrameworkPrice[]
                 {activeTiers.map((t) => {
                   const price = priceMap.get(`${fw.id}-${t.id}`)
                   return (
-                    <td key={t.id} className="text-right px-3 py-2 tabular-nums text-slate-700">
-                      {price ? formatINR(price.projectFeeInr) : '—'}
+                    <td
+                      key={t.id}
+                      className="text-right px-3 py-2 tabular-nums text-slate-700 cursor-pointer hover:bg-brand-50 transition-colors"
+                      onClick={() => openCell(fw.id, t.id, price || undefined)}
+                    >
+                      {price ? formatINR(price.projectFeeInr) : (
+                        <span className="text-slate-300 hover:text-brand-600 text-xs">+ Add</span>
+                      )}
                     </td>
                   )
                 })}
-                <td className="px-2 py-2">
-                  <div className="flex justify-end gap-0.5">
-                    <EditButton onClick={() => {
-                      // Find a price for this framework
-                      const existing = prices.find((p) => p.frameworkId === fw.id)
-                      if (existing) openEdit(existing)
-                      else { resetForm(); setForm({ ...form, frameworkId: fw.id }); setEditing(null); setOpen(true) }
-                    }} />
-                  </div>
-                </td>
+                <td className="px-2 py-2" />
               </tr>
             ))}
           </tbody>
@@ -568,7 +581,7 @@ function PricesSection({ prices, frameworks, tiers }: { prices: FrameworkPrice[]
         </div>
       )}
 
-      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setEditing(null); setCellTarget(null) } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Framework Price' : 'Add Framework Price'}</DialogTitle>
@@ -576,7 +589,7 @@ function PricesSection({ prices, frameworks, tiers }: { prices: FrameworkPrice[]
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <FormField label="Framework">
-              <Select value={form.frameworkId} onValueChange={(v) => setForm({ ...form, frameworkId: v })}>
+              <Select value={form.frameworkId} onValueChange={(v) => setForm({ ...form, frameworkId: v })} disabled={!!cellTarget}>
                 <SelectTrigger><SelectValue placeholder="Select framework" /></SelectTrigger>
                 <SelectContent>
                   {activeFrameworks.map((fw) => (
@@ -586,7 +599,7 @@ function PricesSection({ prices, frameworks, tiers }: { prices: FrameworkPrice[]
               </Select>
             </FormField>
             <FormField label="Tier">
-              <Select value={form.tierId} onValueChange={(v) => setForm({ ...form, tierId: v })}>
+              <Select value={form.tierId} onValueChange={(v) => setForm({ ...form, tierId: v })} disabled={!!cellTarget}>
                 <SelectTrigger><SelectValue placeholder="Select tier" /></SelectTrigger>
                 <SelectContent>
                   {activeTiers.map((t) => (

@@ -1,0 +1,1187 @@
+     1→     1→/**
+     2→     2→ * iSecurify — Admin Panel (full CRUD)
+     3→     3→ * Sections: Frameworks, Tiers, Framework Prices, Auditor Fees,
+     4→     4→ *           Add-on Services, GRC Tools, DPO/vCISO Packages, FX Rate
+     5→     5→ */
+     6→     6→'use client'
+     7→     7→
+     8→     8→import { useState, useCallback } from 'react'
+     9→     9→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+    10→    10→import { api } from '@/lib/api-client'
+    11→    11→import { TopBar } from '@/components/isecurify/Shell'
+    12→    12→import { SectionCard, EmptyState } from '@/components/isecurify/Atoms'
+    13→    13→import { formatINR } from '@/lib/currency'
+    14→    14→import { FRAMEWORK_CATEGORY_META } from '@/lib/quoteCalculator'
+    15→    15→import { cn } from '@/lib/utils'
+    16→    16→import { toast } from 'sonner'
+    17→    17→
+    18→    18→import { Button } from '@/components/ui/button'
+    19→    19→import { Input } from '@/components/ui/input'
+    20→    20→import { Label } from '@/components/ui/label'
+    21→    21→import { Textarea } from '@/components/ui/textarea'
+    22→    22→import { Switch } from '@/components/ui/switch'
+    23→    23→import {
+    24→    24→  Dialog,
+    25→    25→  DialogContent,
+    26→    26→  DialogHeader,
+    27→    27→  DialogTitle,
+    28→    28→  DialogDescription,
+    29→    29→} from '@/components/ui/dialog'
+    30→    30→import {
+    31→    31→  Select,
+    32→    32→  SelectTrigger,
+    33→    33→  SelectValue,
+    34→    34→  SelectContent,
+    35→    35→  SelectItem,
+    36→    36→} from '@/components/ui/select'
+    37→    37→import {
+    38→    38→  AlertDialog,
+    39→    39→  AlertDialogAction,
+    40→    40→  AlertDialogCancel,
+    41→    41→  AlertDialogContent,
+    42→    42→  AlertDialogDescription,
+    43→    43→  AlertDialogFooter,
+    44→    44→  AlertDialogHeader,
+    45→    45→  AlertDialogTitle,
+    46→    46→  AlertDialogTrigger,
+    47→    47→} from '@/components/ui/alert-dialog'
+    48→    48→
+    49→    49→import {
+    50→    50→  Layers,
+    51→    51→  ShieldCheck,
+    52→    52→  Banknote,
+    53→    53→  Package,
+    54→    54→  Wrench,
+    55→    55→  Clock,
+    56→    56→  TrendingUp,
+    57→    57→  Loader2,
+    58→    58→  Pencil,
+    59→    59→  Check,
+    60→    60→  Plus,
+    61→    61→  Trash2,
+    62→    62→} from 'lucide-react'
+    63→    63→import type {
+    64→    64→  Framework,
+    65→    65→  Tier,
+    66→    66→  FrameworkPrice,
+    67→    67→  AuditorFee,
+    68→    68→  AddonService,
+    69→    69→  GrcTool,
+    70→    70→  DpoVcisoPackage,
+    71→    71→  FrameworkCategory,
+    72→    72→  AddonCategory,
+    73→    73→  DpoVcisoType,
+    74→    74→} from '@/types'
+    75→    75→
+    76→    76→// ── Types ──────────────────────────────────────────────────────
+    77→    77→type Section =
+    78→    78→  | 'frameworks'
+    79→    79→  | 'tiers'
+    80→    80→  | 'prices'
+    81→    81→  | 'auditors'
+    82→    82→  | 'addons'
+    83→    83→  | 'grc'
+    84→    84→  | 'dpo'
+    85→    85→  | 'fx'
+    86→    86→
+    87→    87→const SECTIONS: Array<{ id: Section; label: string; icon: React.ReactNode }> = [
+    88→    88→  { id: 'frameworks', label: 'Frameworks', icon: <Layers className="h-4 w-4" /> },
+    89→    89→  { id: 'tiers', label: 'Tiers', icon: <ShieldCheck className="h-4 w-4" /> },
+    90→    90→  { id: 'prices', label: 'Framework Prices', icon: <Banknote className="h-4 w-4" /> },
+    91→    91→  { id: 'auditors', label: 'Auditor Fees', icon: <Check className="h-4 w-4" /> },
+    92→    92→  { id: 'addons', label: 'Add-on Services', icon: <Package className="h-4 w-4" /> },
+    93→    93→  { id: 'grc', label: 'GRC Tools', icon: <Wrench className="h-4 w-4" /> },
+    94→    94→  { id: 'dpo', label: 'DPO / vCISO', icon: <Clock className="h-4 w-4" /> },
+    95→    95→  { id: 'fx', label: 'FX Rate', icon: <TrendingUp className="h-4 w-4" /> },
+    96→    96→]
+    97→    97→
+    98→    98→interface PricingData {
+    99→    99→  frameworks: Framework[]
+   100→   100→  tiers: Tier[]
+   101→   101→  frameworkPrices: FrameworkPrice[]
+   102→   102→  auditorFees: AuditorFee[]
+   103→   103→  addonServices: AddonService[]
+   104→   104→  grcTools: GrcTool[]
+   105→   105→  dpoVcisoPackages: DpoVcisoPackage[]
+   106→   106→  fxRate: number
+   107→   107→}
+   108→   108→
+   109→   109→// ── Shared components ──────────────────────────────────────────
+   110→   110→
+   111→   111→function DeleteConfirm({ onConfirm, label }: { onConfirm: () => void; label: string }) {
+   112→   112→  return (
+   113→   113→    <AlertDialog>
+   114→   114→      <AlertDialogTrigger asChild>
+   115→   115→        <Button variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-rose-600">
+   116→   116→          <Trash2 className="h-3.5 w-3.5" />
+   117→   117→        </Button>
+   118→   118→      </AlertDialogTrigger>
+   119→   119→      <AlertDialogContent>
+   120→   120→        <AlertDialogHeader>
+   121→   121→          <AlertDialogTitle>Delete {label}?</AlertDialogTitle>
+   122→   122→          <AlertDialogDescription>
+   123→   123→            This action cannot be undone. The item will be deactivated.
+   124→   124→          </AlertDialogDescription>
+   125→   125→        </AlertDialogHeader>
+   126→   126→        <AlertDialogFooter>
+   127→   127→          <AlertDialogCancel>Cancel</AlertDialogCancel>
+   128→   128→          <AlertDialogAction
+   129→   129→            onClick={onConfirm}
+   130→   130→            className="bg-rose-600 hover:bg-rose-700"
+   131→   131→          >
+   132→   132→            Delete
+   133→   133→          </AlertDialogAction>
+   134→   134→        </AlertDialogFooter>
+   135→   135→      </AlertDialogContent>
+   136→   136→    </AlertDialog>
+   137→   137→  )
+   138→   138→}
+   139→   139→
+   140→   140→function EditButton({ onClick }: { onClick: () => void }) {
+   141→   141→  return (
+   142→   142→    <Button
+   143→   143→      variant="ghost"
+   144→   144→      size="icon"
+   145→   145→      className="h-7 w-7 text-slate-400 hover:text-brand-700"
+   146→   146→      onClick={onClick}
+   147→   147→    >
+   148→   148→      <Pencil className="h-3.5 w-3.5" />
+   149→   149→    </Button>
+   150→   150→  )
+   151→   151→}
+   152→   152→
+   153→   153→function FormField({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+   154→   154→  return (
+   155→   155→    <div className={cn('space-y-1.5', className)}>
+   156→   156→      <Label className="text-xs font-medium text-slate-700">{label}</Label>
+   157→   157→      {children}
+   158→   158→    </div>
+   159→   159→  )
+   160→   160→}
+   161→   161→
+   162→   162→// ── Main view ──────────────────────────────────────────────────
+   163→   163→
+   164→   164→export function AdminView() {
+   165→   165→  const [section, setSection] = useState<Section>('frameworks')
+   166→   166→
+   167→   167→  const { data, isLoading } = useQuery({
+   168→   168→    queryKey: ['pricing'],
+   169→   169→    queryFn: () => api.get<PricingData>('/pricing'),
+   170→   170→  })
+   171→   171→
+   172→   172→  return (
+   173→   173→    <>
+   174→   174→      <TopBar title="Admin Panel" subtitle="Master pricing data management" />
+   175→   175→
+   176→   176→      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)]">
+   177→   177→        {/* Section tabs */}
+   178→   178→        <nav className="lg:w-60 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white p-3 lg:p-4" aria-label="Admin sections">
+   179→   179→          <div className="flex lg:flex-col gap-1 overflow-x-auto">
+   180→   180→            {SECTIONS.map((s) => (
+   181→   181→              <button
+   182→   182→                key={s.id}
+   183→   183→                onClick={() => setSection(s.id)}
+   184→   184→                className={cn(
+   185→   185→                  'shrink-0 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+   186→   186→                  section === s.id
+   187→   187→                    ? 'bg-brand-50 text-brand-800'
+   188→   188→                    : 'text-slate-600 hover:bg-slate-100',
+   189→   189→                )}
+   190→   190→              >
+   191→   191→                {s.icon} {s.label}
+   192→   192→              </button>
+   193→   193→            ))}
+   194→   194→          </div>
+   195→   195→        </nav>
+   196→   196→
+   197→   197→        {/* Section content */}
+   198→   198→        <main className="flex-1 p-4 md:p-8 min-w-0">
+   199→   199→          {isLoading || !data ? (
+   200→   200→            <div className="flex items-center justify-center py-20">
+   201→   201→              <Loader2 className="h-6 w-6 animate-spin text-brand-600" />
+   202→   202→            </div>
+   203→   203→          ) : (
+   204→   204→            <>
+   205→   205→              {section === 'frameworks' && <FrameworksSection frameworks={data.frameworks} />}
+   206→   206→              {section === 'tiers' && <TiersSection tiers={data.tiers} />}
+   207→   207→              {section === 'prices' && <PricesSection prices={data.frameworkPrices} frameworks={data.frameworks} tiers={data.tiers} />}
+   208→   208→              {section === 'auditors' && <AuditorsSection fees={data.auditorFees} />}
+   209→   209→              {section === 'addons' && <AddonsSection addons={data.addonServices} />}
+   210→   210→              {section === 'grc' && <GrcSection tools={data.grcTools} />}
+   211→   211→              {section === 'dpo' && <DpoSection packages={data.dpoVcisoPackages} />}
+   212→   212→              {section === 'fx' && <FxSection rate={data.fxRate} />}
+   213→   213→            </>
+   214→   214→          )}
+   215→   215→        </main>
+   216→   216→      </div>
+   217→   217→    </>
+   218→   218→  )
+   219→   219→}
+   220→   220→
+   221→   221→// ─── 1. Frameworks ─────────────────────────────────────────────
+   222→   222→
+   223→   223→const FRAMEWORK_CATEGORIES: FrameworkCategory[] = ['IT_Security', 'Privacy', 'Quality', 'Food_Safety', 'Industry']
+   224→   224→
+   225→   225→function FrameworksSection({ frameworks }: { frameworks: Framework[] }) {
+   226→   226→  const qc = useQueryClient()
+   227→   227→  const [open, setOpen] = useState(false)
+   228→   228→  const [editing, setEditing] = useState<Framework | null>(null)
+   229→   229→
+   230→   230→  const [form, setForm] = useState({ name: '', category: 'IT_Security' as FrameworkCategory, description: '', sortOrder: 0, isActive: true })
+   231→   231→
+   232→   232→  const resetForm = useCallback((fw?: Framework) => {
+   233→   233→    if (fw) {
+   234→   234→      setForm({ name: fw.name, category: fw.category, description: fw.description ?? '', sortOrder: fw.sortOrder, isActive: fw.isActive })
+   235→   235→    } else {
+   236→   236→      setForm({ name: '', category: 'IT_Security', description: '', sortOrder: 0, isActive: true })
+   237→   237→    }
+   238→   238→  }, [])
+   239→   239→
+   240→   240→  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
+   241→   241→  const openEdit = (fw: Framework) => { resetForm(fw); setEditing(fw); setOpen(true) }
+   242→   242→
+   243→   243→  const addMutation = useMutation({
+   244→   244→    mutationFn: (body: typeof form) => api.post<Framework>('/admin/frameworks', body),
+   245→   245→    onSuccess: () => { toast.success('Framework added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   246→   246→    onError: (e: Error) => toast.error(e.message),
+   247→   247→  })
+   248→   248→
+   249→   249→  const editMutation = useMutation({
+   250→   250→    mutationFn: (body: Partial<typeof form>) => api.put<Framework>(`/admin/frameworks/${editing!.id}`, body),
+   251→   251→    onSuccess: () => { toast.success('Framework updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   252→   252→    onError: (e: Error) => toast.error(e.message),
+   253→   253→  })
+   254→   254→
+   255→   255→  const deleteMutation = useMutation({
+   256→   256→    mutationFn: (id: string) => api.delete(`/admin/frameworks/${id}`),
+   257→   257→    onSuccess: () => { toast.success('Framework deleted'); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   258→   258→    onError: (e: Error) => toast.error(e.message),
+   259→   259→  })
+   260→   260→
+   261→   261→  const handleSubmit = () => {
+   262→   262→    if (!form.name.trim()) { toast.error('Name is required'); return }
+   263→   263→    if (editing) editMutation.mutate(form)
+   264→   264→    else addMutation.mutate(form)
+   265→   265→  }
+   266→   266→
+   267→   267→  const grouped = frameworks.reduce((acc, fw) => {
+   268→   268→    (acc[fw.category] ||= []).push(fw)
+   269→   269→    return acc
+   270→   270→  }, {} as Record<string, Framework[]>)
+   271→   271→
+   272→   272→  return (
+   273→   273→    <SectionCard
+   274→   274→      title="Frameworks"
+   275→   275→      description={`${frameworks.length} frameworks, grouped by category`}
+   276→   276→      action={<Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={openAdd}><Plus className="h-4 w-4 mr-1" /> Add Framework</Button>}
+   277→   277→    >
+   278→   278→      {Object.keys(grouped).length === 0 ? (
+   279→   279→        <EmptyState title="No frameworks" description="Add your first framework to get started" />
+   280→   280→      ) : (
+   281→   281→        <div className="space-y-5">
+   282→   282→          {Object.entries(grouped).map(([category, fws]) => {
+   283→   283→            const meta = FRAMEWORK_CATEGORY_META[category] || { label: category }
+   284→   284→            return (
+   285→   285→              <div key={category}>
+   286→   286→                <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">{meta.label}</h4>
+   287→   287→                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+   288→   288→                  {fws.map((fw) => (
+   289→   289→                    <div key={fw.id} className="group relative rounded-lg border border-slate-200 p-3 hover:border-brand-300 transition-colors">
+   290→   290→                      <div className="absolute top-2 right-2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+   291→   291→                        <EditButton onClick={() => openEdit(fw)} />
+   292→   292→                        <DeleteConfirm label={fw.name} onConfirm={() => deleteMutation.mutate(fw.id)} />
+   293→   293→                      </div>
+   294→   294→                      <p className="text-sm font-medium text-slate-900">{fw.name}</p>
+   295→   295→                      <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{fw.description}</p>
+   296→   296→                      {!fw.isActive && <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500">Inactive</span>}
+   297→   297→                    </div>
+   298→   298→                  ))}
+   299→   299→                </div>
+   300→   300→              </div>
+   301→   301→            )
+   302→   302→          })}
+   303→   303→        </div>
+   304→   304→      )}
+   305→   305→
+   306→   306→      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+   307→   307→        <DialogContent className="sm:max-w-md">
+   308→   308→          <DialogHeader>
+   309→   309→            <DialogTitle>{editing ? 'Edit Framework' : 'Add Framework'}</DialogTitle>
+   310→   310→            <DialogDescription>{editing ? 'Update framework details' : 'Create a new certification framework'}</DialogDescription>
+   311→   311→          </DialogHeader>
+   312→   312→          <div className="space-y-4 pt-2">
+   313→   313→            <FormField label="Name">
+   314→   314→              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. ISO 27001" />
+   315→   315→            </FormField>
+   316→   316→            <FormField label="Category">
+   317→   317→              <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as FrameworkCategory })}>
+   318→   318→                <SelectTrigger><SelectValue /></SelectTrigger>
+   319→   319→                <SelectContent>
+   320→   320→                  {FRAMEWORK_CATEGORIES.map((c) => (
+   321→   321→                    <SelectItem key={c} value={c}>{FRAMEWORK_CATEGORY_META[c]?.label ?? c}</SelectItem>
+   322→   322→                  ))}
+   323→   323→                </SelectContent>
+   324→   324→              </Select>
+   325→   325→            </FormField>
+   326→   326→            <FormField label="Description">
+   327→   327→              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Brief description..." rows={2} />
+   328→   328→            </FormField>
+   329→   329→            <FormField label="Sort Order">
+   330→   330→              <Input type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+   331→   331→            </FormField>
+   332→   332→            <div className="flex items-center gap-2">
+   333→   333→              <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+   334→   334→              <Label className="text-xs text-slate-600">Active</Label>
+   335→   335→            </div>
+   336→   336→            <div className="flex justify-end gap-2 pt-2">
+   337→   337→              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+   338→   338→              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+   339→   339→                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+   340→   340→                {editing ? 'Update' : 'Create'}
+   341→   341→              </Button>
+   342→   342→            </div>
+   343→   343→          </div>
+   344→   344→        </DialogContent>
+   345→   345→      </Dialog>
+   346→   346→    </SectionCard>
+   347→   347→  )
+   348→   348→}
+   349→   349→
+   350→   350→// ─── 2. Tiers ──────────────────────────────────────────────────
+   351→   351→
+   352→   352→function TiersSection({ tiers }: { tiers: Tier[] }) {
+   353→   353→  const qc = useQueryClient()
+   354→   354→  const [open, setOpen] = useState(false)
+   355→   355→  const [editing, setEditing] = useState<Tier | null>(null)
+   356→   356→  const [form, setForm] = useState({ name: '', retainerPct: 0, sortOrder: 0, isActive: true })
+   357→   357→
+   358→   358→  const resetForm = useCallback((t?: Tier) => {
+   359→   359→    if (t) setForm({ name: t.name, retainerPct: t.retainerPct, sortOrder: t.sortOrder, isActive: t.isActive })
+   360→   360→    else setForm({ name: '', retainerPct: 0, sortOrder: 0, isActive: true })
+   361→   361→  }, [])
+   362→   362→
+   363→   363→  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
+   364→   364→  const openEdit = (t: Tier) => { resetForm(t); setEditing(t); setOpen(true) }
+   365→   365→
+   366→   366→  const addMutation = useMutation({
+   367→   367→    mutationFn: (body: typeof form) => api.post<Tier>('/admin/tiers', body),
+   368→   368→    onSuccess: () => { toast.success('Tier added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   369→   369→    onError: (e: Error) => toast.error(e.message),
+   370→   370→  })
+   371→   371→
+   372→   372→  const editMutation = useMutation({
+   373→   373→    mutationFn: (body: Partial<typeof form>) => api.put<Tier>(`/admin/tiers/${editing!.id}`, body),
+   374→   374→    onSuccess: () => { toast.success('Tier updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   375→   375→    onError: (e: Error) => toast.error(e.message),
+   376→   376→  })
+   377→   377→
+   378→   378→  const deleteMutation = useMutation({
+   379→   379→    mutationFn: (id: string) => api.delete(`/admin/tiers/${id}`),
+   380→   380→    onSuccess: () => { toast.success('Tier deleted'); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   381→   381→    onError: (e: Error) => toast.error(e.message),
+   382→   382→  })
+   383→   383→
+   384→   384→  const handleSubmit = () => {
+   385→   385→    if (!form.name.trim()) { toast.error('Name is required'); return }
+   386→   386→    if (editing) editMutation.mutate(form)
+   387→   387→    else addMutation.mutate(form)
+   388→   388→  }
+   389→   389→
+   390→   390→  return (
+   391→   391→    <SectionCard
+   392→   392→      title="Tiers"
+   393→   393→      description={`${tiers.length} company-size tiers with retainer percentages`}
+   394→   394→      action={<Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={openAdd}><Plus className="h-4 w-4 mr-1" /> Add Tier</Button>}
+   395→   395→    >
+   396→   396→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   397→   397→        {tiers.map((tier) => (
+   398→   398→          <div key={tier.id} className="group relative rounded-lg border border-slate-200 p-4 hover:border-brand-300 transition-colors">
+   399→   399→            <div className="absolute top-3 right-3 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+   400→   400→              <EditButton onClick={() => openEdit(tier)} />
+   401→   401→              <DeleteConfirm label={tier.name} onConfirm={() => deleteMutation.mutate(tier.id)} />
+   402→   402→            </div>
+   403→   403→            <p className="text-sm font-bold text-slate-900">{tier.name}</p>
+   404→   404→            <p className="text-2xl font-bold text-brand-700 mt-1">{tier.retainerPct}%</p>
+   405→   405→            <p className="text-xs text-slate-500 mt-0.5">annual retainer</p>
+   406→   406→            {!tier.isActive && <span className="inline-block mt-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-500">Inactive</span>}
+   407→   407→          </div>
+   408→   408→        ))}
+   409→   409→      </div>
+   410→   410→
+   411→   411→      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+   412→   412→        <DialogContent className="sm:max-w-md">
+   413→   413→          <DialogHeader>
+   414→   414→            <DialogTitle>{editing ? 'Edit Tier' : 'Add Tier'}</DialogTitle>
+   415→   415→            <DialogDescription>{editing ? 'Update tier details' : 'Create a new company-size tier'}</DialogDescription>
+   416→   416→          </DialogHeader>
+   417→   417→          <div className="space-y-4 pt-2">
+   418→   418→            <FormField label="Name">
+   419→   419→              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Mid-size" />
+   420→   420→            </FormField>
+   421→   421→            <FormField label="Retainer %">
+   422→   422→              <Input type="number" step="0.1" value={form.retainerPct} onChange={(e) => setForm({ ...form, retainerPct: parseFloat(e.target.value) || 0 })} />
+   423→   423→            </FormField>
+   424→   424→            <FormField label="Sort Order">
+   425→   425→              <Input type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+   426→   426→            </FormField>
+   427→   427→            <div className="flex items-center gap-2">
+   428→   428→              <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+   429→   429→              <Label className="text-xs text-slate-600">Active</Label>
+   430→   430→            </div>
+   431→   431→            <div className="flex justify-end gap-2 pt-2">
+   432→   432→              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+   433→   433→              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+   434→   434→                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+   435→   435→                {editing ? 'Update' : 'Create'}
+   436→   436→              </Button>
+   437→   437→            </div>
+   438→   438→          </div>
+   439→   439→        </DialogContent>
+   440→   440→      </Dialog>
+   441→   441→    </SectionCard>
+   442→   442→  )
+   443→   443→}
+   444→   444→
+   445→   445→// ─── 3. Framework Prices ──────────────────────────────────────
+   446→   446→
+   447→   447→function PricesSection({ prices, frameworks, tiers }: { prices: FrameworkPrice[]; frameworks: Framework[]; tiers: Tier[] }) {
+   448→   448→  const qc = useQueryClient()
+   449→   449→  const [open, setOpen] = useState(false)
+   450→   450→  const [editing, setEditing] = useState<FrameworkPrice | null>(null)
+   451→   451→  const [form, setForm] = useState({ frameworkId: '', tierId: '', projectFeeInr: 0, retainerFeeInr: 0 })
+   452→   452→
+   453→   453→  const resetForm = useCallback((p?: FrameworkPrice) => {
+   454→   454→    if (p) setForm({ frameworkId: p.frameworkId, tierId: p.tierId, projectFeeInr: p.projectFeeInr, retainerFeeInr: p.retainerFeeInr })
+   455→   455→    else setForm({ frameworkId: '', tierId: '', projectFeeInr: 0, retainerFeeInr: 0 })
+   456→   456→  }, [])
+   457→   457→
+   458→   458→  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
+   459→   459→  const openEdit = (p: FrameworkPrice) => { resetForm(p); setEditing(p); setOpen(true) }
+   460→   460→
+   461→   461→  const addMutation = useMutation({
+   462→   462→    mutationFn: (body: typeof form) => api.post<FrameworkPrice>('/admin/framework-prices', body),
+   463→   463→    onSuccess: () => { toast.success('Price added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   464→   464→    onError: (e: Error) => toast.error(e.message),
+   465→   465→  })
+   466→   466→
+   467→   467→  const editMutation = useMutation({
+   468→   468→    mutationFn: (body: Partial<typeof form>) => api.put<FrameworkPrice>(`/admin/framework-prices/${editing!.id}`, body),
+   469→   469→    onSuccess: () => { toast.success('Price updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   470→   470→    onError: (e: Error) => toast.error(e.message),
+   471→   471→  })
+   472→   472→
+   473→   473→  const deleteMutation = useMutation({
+   474→   474→    mutationFn: (id: string) => api.delete(`/admin/framework-prices/${id}`),
+   475→   475→    onSuccess: () => { toast.success('Price deleted'); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   476→   476→    onError: (e: Error) => toast.error(e.message),
+   477→   477→  })
+   478→   478→
+   479→   479→  const handleSubmit = () => {
+   480→   480→    if (!form.frameworkId || !form.tierId) { toast.error('Framework and Tier are required'); return }
+   481→   481→    if (editing) editMutation.mutate(form)
+   482→   482→    else addMutation.mutate(form)
+   483→   483→  }
+   484→   484→
+   485→   485→  const activeFrameworks = frameworks.filter((f) => f.isActive).sort((a, b) => a.sortOrder - b.sortOrder)
+   486→   486→  const activeTiers = tiers.filter((t) => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder)
+   487→   487→
+   488→   488→  // Build a lookup map for the grid
+   489→   489→  const priceMap = new Map<string, FrameworkPrice>()
+   490→   490→  prices.forEach((p) => priceMap.set(`${p.frameworkId}-${p.tierId}`, p))
+   491→   491→
+   492→   492→  return (
+   493→   493→    <SectionCard
+   494→   494→      title="Framework Price Grid"
+   495→   495→      description="Rows = frameworks, columns = tiers. Click edit on any price to modify."
+   496→   496→      action={<Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={openAdd}><Plus className="h-4 w-4 mr-1" /> Add Price</Button>}
+   497→   497→    >
+   498→   498→      <div className="overflow-x-auto">
+   499→   499→        <table className="w-full text-sm border-collapse">
+   500→   500→          <thead>
+   501→   501→            <tr className="border-b border-slate-200">
+   502→   502→              <th className="text-left px-3 py-2 font-semibold text-slate-600 sticky left-0 bg-white z-10">Framework</th>
+   503→   503→              {activeTiers.map((t) => (
+   504→   504→                <th key={t.id} className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap">
+   505→   505→                  {t.name}
+   506→   506→                  <span className="block text-[10px] font-normal text-slate-400">({t.retainerPct}% ret.)</span>
+   507→   507→                </th>
+   508→   508→              ))}
+   509→   509→              <th className="w-16" />
+   510→   510→            </tr>
+   511→   511→          </thead>
+   512→   512→          <tbody>
+   513→   513→            {activeFrameworks.map((fw) => (
+   514→   514→              <tr key={fw.id} className="border-b border-slate-100 hover:bg-slate-50">
+   515→   515→                <td className="px-3 py-2 font-medium text-slate-900 sticky left-0 bg-white z-10">
+   516→   516→                  {fw.name}
+   517→   517→                  <span className="block text-[10px] text-slate-400">{FRAMEWORK_CATEGORY_META[fw.category]?.label}</span>
+   518→   518→                </td>
+   519→   519→                {activeTiers.map((t) => {
+   520→   520→                  const price = priceMap.get(`${fw.id}-${t.id}`)
+   521→   521→                  return (
+   522→   522→                    <td key={t.id} className="text-right px-3 py-2 tabular-nums text-slate-700">
+   523→   523→                      {price ? formatINR(price.projectFeeInr) : '—'}
+   524→   524→                    </td>
+   525→   525→                  )
+   526→   526→                })}
+   527→   527→                <td className="px-2 py-2">
+   528→   528→                  <div className="flex justify-end gap-0.5">
+   529→   529→                    <EditButton onClick={() => {
+   530→   530→                      // Find a price for this framework
+   531→   531→                      const existing = prices.find((p) => p.frameworkId === fw.id)
+   532→   532→                      if (existing) openEdit(existing)
+   533→   533→                      else { resetForm(); setForm({ ...form, frameworkId: fw.id }); setEditing(null); setOpen(true) }
+   534→   534→                    }} />
+   535→   535→                  </div>
+   536→   536→                </td>
+   537→   537→              </tr>
+   538→   538→            ))}
+   539→   539→          </tbody>
+   540→   540→        </table>
+   541→   541→      </div>
+   542→   542→
+   543→   543→      {/* Price list below the grid for editing/deleting individual prices */}
+   544→   544→      {prices.length > 0 && (
+   545→   545→        <div className="mt-6 border-t border-slate-200 pt-4">
+   546→   546→          <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">All Prices ({prices.length})</h4>
+   547→   547→          <div className="max-h-72 overflow-y-auto space-y-1">
+   548→   548→            {prices.map((p) => {
+   549→   549→              const fwName = p.framework?.name ?? p.frameworkId
+   550→   550→              const tName = p.tier?.name ?? p.tierId
+   551→   551→              return (
+   552→   552→                <div key={p.id} className="group flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 hover:border-brand-300 transition-colors">
+   553→   553→                  <div className="flex items-center gap-3 min-w-0">
+   554→   554→                    <span className="text-sm font-medium text-slate-900 truncate">{fwName}</span>
+   555→   555→                    <span className="text-xs text-slate-400">→</span>
+   556→   556→                    <span className="text-xs font-medium text-slate-600">{tName}</span>
+   557→   557→                    <span className="text-xs text-slate-500">Project: {formatINR(p.projectFeeInr)}</span>
+   558→   558→                    <span className="text-xs text-slate-500">Retainer: {formatINR(p.retainerFeeInr)}</span>
+   559→   559→                  </div>
+   560→   560→                  <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+   561→   561→                    <EditButton onClick={() => openEdit(p)} />
+   562→   562→                    <DeleteConfirm label="price entry" onConfirm={() => deleteMutation.mutate(p.id)} />
+   563→   563→                  </div>
+   564→   564→                </div>
+   565→   565→              )
+   566→   566→            })}
+   567→   567→          </div>
+   568→   568→        </div>
+   569→   569→      )}
+   570→   570→
+   571→   571→      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+   572→   572→        <DialogContent className="sm:max-w-md">
+   573→   573→          <DialogHeader>
+   574→   574→            <DialogTitle>{editing ? 'Edit Framework Price' : 'Add Framework Price'}</DialogTitle>
+   575→   575→            <DialogDescription>Set project and retainer fees for a framework × tier combination</DialogDescription>
+   576→   576→          </DialogHeader>
+   577→   577→          <div className="space-y-4 pt-2">
+   578→   578→            <FormField label="Framework">
+   579→   579→              <Select value={form.frameworkId} onValueChange={(v) => setForm({ ...form, frameworkId: v })}>
+   580→   580→                <SelectTrigger><SelectValue placeholder="Select framework" /></SelectTrigger>
+   581→   581→                <SelectContent>
+   582→   582→                  {activeFrameworks.map((fw) => (
+   583→   583→                    <SelectItem key={fw.id} value={fw.id}>{fw.name}</SelectItem>
+   584→   584→                  ))}
+   585→   585→                </SelectContent>
+   586→   586→              </Select>
+   587→   587→            </FormField>
+   588→   588→            <FormField label="Tier">
+   589→   589→              <Select value={form.tierId} onValueChange={(v) => setForm({ ...form, tierId: v })}>
+   590→   590→                <SelectTrigger><SelectValue placeholder="Select tier" /></SelectTrigger>
+   591→   591→                <SelectContent>
+   592→   592→                  {activeTiers.map((t) => (
+   593→   593→                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+   594→   594→                  ))}
+   595→   595→                </SelectContent>
+   596→   596→              </Select>
+   597→   597→            </FormField>
+   598→   598→            <FormField label="Project Fee (INR)">
+   599→   599→              <Input type="number" value={form.projectFeeInr} onChange={(e) => setForm({ ...form, projectFeeInr: parseFloat(e.target.value) || 0 })} />
+   600→   600→            </FormField>
+   601→   601→            <FormField label="Retainer Fee (INR)">
+   602→   602→              <Input type="number" value={form.retainerFeeInr} onChange={(e) => setForm({ ...form, retainerFeeInr: parseFloat(e.target.value) || 0 })} />
+   603→   603→            </FormField>
+   604→   604→            <div className="flex justify-end gap-2 pt-2">
+   605→   605→              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+   606→   606→              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+   607→   607→                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+   608→   608→                {editing ? 'Update' : 'Create'}
+   609→   609→              </Button>
+   610→   610→            </div>
+   611→   611→          </div>
+   612→   612→        </DialogContent>
+   613→   613→      </Dialog>
+   614→   614→    </SectionCard>
+   615→   615→  )
+   616→   616→}
+   617→   617→
+   618→   618→// ─── 4. Auditor Fees ──────────────────────────────────────────
+   619→   619→
+   620→   620→function AuditorsSection({ fees }: { fees: AuditorFee[] }) {
+   621→   621→  const qc = useQueryClient()
+   622→   622→  const [open, setOpen] = useState(false)
+   623→   623→  const [editing, setEditing] = useState<AuditorFee | null>(null)
+   624→   624→  const [form, setForm] = useState({ standardName: '', accreditationBody: '', feeInr: 0, notes: '', isActive: true })
+   625→   625→
+   626→   626→  const resetForm = useCallback((f?: AuditorFee) => {
+   627→   627→    if (f) setForm({ standardName: f.standardName, accreditationBody: f.accreditationBody, feeInr: f.feeInr, notes: f.notes ?? '', isActive: f.isActive })
+   628→   628→    else setForm({ standardName: '', accreditationBody: '', feeInr: 0, notes: '', isActive: true })
+   629→   629→  }, [])
+   630→   630→
+   631→   631→  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
+   632→   632→  const openEdit = (f: AuditorFee) => { resetForm(f); setEditing(f); setOpen(true) }
+   633→   633→
+   634→   634→  const addMutation = useMutation({
+   635→   635→    mutationFn: (body: typeof form) => api.post<AuditorFee>('/admin/auditor-fees', body),
+   636→   636→    onSuccess: () => { toast.success('Auditor fee added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   637→   637→    onError: (e: Error) => toast.error(e.message),
+   638→   638→  })
+   639→   639→
+   640→   640→  const editMutation = useMutation({
+   641→   641→    mutationFn: (body: Partial<typeof form>) => api.put<AuditorFee>(`/admin/auditor-fees/${editing!.id}`, body),
+   642→   642→    onSuccess: () => { toast.success('Auditor fee updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   643→   643→    onError: (e: Error) => toast.error(e.message),
+   644→   644→  })
+   645→   645→
+   646→   646→  const deleteMutation = useMutation({
+   647→   647→    mutationFn: (id: string) => api.delete(`/admin/auditor-fees/${id}`),
+   648→   648→    onSuccess: () => { toast.success('Auditor fee deleted'); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   649→   649→    onError: (e: Error) => toast.error(e.message),
+   650→   650→  })
+   651→   651→
+   652→   652→  const handleSubmit = () => {
+   653→   653→    if (!form.standardName.trim() || !form.accreditationBody.trim()) { toast.error('Standard name and accreditation body are required'); return }
+   654→   654→    if (editing) editMutation.mutate(form)
+   655→   655→    else addMutation.mutate(form)
+   656→   656→  }
+   657→   657→
+   658→   658→  const grouped = fees.reduce((acc, fee) => {
+   659→   659→    (acc[fee.standardName] ||= []).push(fee)
+   660→   660→    return acc
+   661→   661→  }, {} as Record<string, AuditorFee[]>)
+   662→   662→
+   663→   663→  return (
+   664→   664→    <SectionCard
+   665→   665→      title="Auditor Fees"
+   666→   666→      description={`${fees.length} certification body fees — pass-through costs`}
+   667→   667→      action={<Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={openAdd}><Plus className="h-4 w-4 mr-1" /> Add Auditor Fee</Button>}
+   668→   668→    >
+   669→   669→      {Object.keys(grouped).length === 0 ? (
+   670→   670→        <EmptyState title="No auditor fees" description="Add your first auditor fee entry" />
+   671→   671→      ) : (
+   672→   672→        <div className="space-y-4">
+   673→   673→          {Object.entries(grouped).map(([standard, standardFees]) => (
+   674→   674→            <div key={standard} className="rounded-lg border border-slate-200 p-3">
+   675→   675→              <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">{standard}</h4>
+   676→   676→              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+   677→   677→                {standardFees.map((fee) => (
+   678→   678→                  <div key={fee.id} className="group relative flex items-center justify-between rounded bg-slate-50 px-3 py-2 hover:bg-slate-100 transition-colors">
+   679→   679→                    <div className="min-w-0 flex-1">
+   680→   680→                      <p className="text-xs font-medium text-slate-700">{fee.accreditationBody}</p>
+   681→   681→                      {fee.notes && <p className="text-[10px] text-slate-400">{fee.notes}</p>}
+   682→   682→                      {!fee.isActive && <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-500">Inactive</span>}
+   683→   683→                    </div>
+   684→   684→                    <div className="flex items-center gap-1 shrink-0">
+   685→   685→                      <p className="text-sm font-bold text-slate-900">{formatINR(fee.feeInr)}</p>
+   686→   686→                      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+   687→   687→                        <EditButton onClick={() => openEdit(fee)} />
+   688→   688→                        <DeleteConfirm label={fee.accreditationBody} onConfirm={() => deleteMutation.mutate(fee.id)} />
+   689→   689→                      </div>
+   690→   690→                    </div>
+   691→   691→                  </div>
+   692→   692→                ))}
+   693→   693→              </div>
+   694→   694→            </div>
+   695→   695→          ))}
+   696→   696→        </div>
+   697→   697→      )}
+   698→   698→
+   699→   699→      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+   700→   700→        <DialogContent className="sm:max-w-md">
+   701→   701→          <DialogHeader>
+   702→   702→            <DialogTitle>{editing ? 'Edit Auditor Fee' : 'Add Auditor Fee'}</DialogTitle>
+   703→   703→            <DialogDescription>Set certification body pass-through costs</DialogDescription>
+   704→   704→          </DialogHeader>
+   705→   705→          <div className="space-y-4 pt-2">
+   706→   706→            <FormField label="Standard Name">
+   707→   707→              <Input value={form.standardName} onChange={(e) => setForm({ ...form, standardName: e.target.value })} placeholder="e.g. ISO 27001" />
+   708→   708→            </FormField>
+   709→   709→            <FormField label="Accreditation Body">
+   710→   710→              <Input value={form.accreditationBody} onChange={(e) => setForm({ ...form, accreditationBody: e.target.value })} placeholder="e.g. BSI, TUV, SGS" />
+   711→   711→            </FormField>
+   712→   712→            <FormField label="Fee (INR)">
+   713→   713→              <Input type="number" value={form.feeInr} onChange={(e) => setForm({ ...form, feeInr: parseFloat(e.target.value) || 0 })} />
+   714→   714→            </FormField>
+   715→   715→            <FormField label="Notes">
+   716→   716→              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Any additional notes..." rows={2} />
+   717→   717→            </FormField>
+   718→   718→            <div className="flex items-center gap-2">
+   719→   719→              <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+   720→   720→              <Label className="text-xs text-slate-600">Active</Label>
+   721→   721→            </div>
+   722→   722→            <div className="flex justify-end gap-2 pt-2">
+   723→   723→              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+   724→   724→              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+   725→   725→                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+   726→   726→                {editing ? 'Update' : 'Create'}
+   727→   727→              </Button>
+   728→   728→            </div>
+   729→   729→          </div>
+   730→   730→        </DialogContent>
+   731→   731→      </Dialog>
+   732→   732→    </SectionCard>
+   733→   733→  )
+   734→   734→}
+   735→   735→
+   736→   736→// ─── 5. Add-on Services ───────────────────────────────────────
+   737→   737→
+   738→   738→const ADDON_CATEGORIES: AddonCategory[] = ['gap_analysis', 'documentation', 'training', 'audit', 'advisory']
+   739→   739→
+   740→   740→function AddonsSection({ addons }: { addons: AddonService[] }) {
+   741→   741→  const qc = useQueryClient()
+   742→   742→  const [open, setOpen] = useState(false)
+   743→   743→  const [editing, setEditing] = useState<AddonService | null>(null)
+   744→   744→  const [form, setForm] = useState({ name: '', description: '', category: 'gap_analysis' as AddonCategory, feeInr: 0, sortOrder: 0, isActive: true })
+   745→   745→
+   746→   746→  const resetForm = useCallback((a?: AddonService) => {
+   747→   747→    if (a) setForm({ name: a.name, description: a.description ?? '', category: a.category, feeInr: a.feeInr, sortOrder: a.sortOrder, isActive: a.isActive })
+   748→   748→    else setForm({ name: '', description: '', category: 'gap_analysis', feeInr: 0, sortOrder: 0, isActive: true })
+   749→   749→  }, [])
+   750→   750→
+   751→   751→  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
+   752→   752→  const openEdit = (a: AddonService) => { resetForm(a); setEditing(a); setOpen(true) }
+   753→   753→
+   754→   754→  const addMutation = useMutation({
+   755→   755→    mutationFn: (body: typeof form) => api.post<AddonService>('/admin/addon-services', body),
+   756→   756→    onSuccess: () => { toast.success('Add-on service added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   757→   757→    onError: (e: Error) => toast.error(e.message),
+   758→   758→  })
+   759→   759→
+   760→   760→  const editMutation = useMutation({
+   761→   761→    mutationFn: (body: Partial<typeof form>) => api.put<AddonService>(`/admin/addon-services/${editing!.id}`, body),
+   762→   762→    onSuccess: () => { toast.success('Add-on service updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   763→   763→    onError: (e: Error) => toast.error(e.message),
+   764→   764→  })
+   765→   765→
+   766→   766→  const deleteMutation = useMutation({
+   767→   767→    mutationFn: (id: string) => api.delete(`/admin/addon-services/${id}`),
+   768→   768→    onSuccess: () => { toast.success('Add-on service deleted'); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   769→   769→    onError: (e: Error) => toast.error(e.message),
+   770→   770→  })
+   771→   771→
+   772→   772→  const handleSubmit = () => {
+   773→   773→    if (!form.name.trim()) { toast.error('Name is required'); return }
+   774→   774→    if (editing) editMutation.mutate(form)
+   775→   775→    else addMutation.mutate(form)
+   776→   776→  }
+   777→   777→
+   778→   778→  const categoryLabel = (c: string) => c.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+   779→   779→
+   780→   780→  return (
+   781→   781→    <SectionCard
+   782→   782→      title="Add-on Services"
+   783→   783→      description={`${addons.length} optional bolt-on services`}
+   784→   784→      action={<Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={openAdd}><Plus className="h-4 w-4 mr-1" /> Add Service</Button>}
+   785→   785→    >
+   786→   786→      {addons.length === 0 ? (
+   787→   787→        <EmptyState title="No add-on services" description="Add your first add-on service" />
+   788→   788→      ) : (
+   789→   789→        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+   790→   790→          {addons.map((addon) => (
+   791→   791→            <div key={addon.id} className="group relative rounded-lg border border-slate-200 p-4 flex items-start justify-between gap-3 hover:border-brand-300 transition-colors">
+   792→   792→              <div className="absolute top-3 right-3 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+   793→   793→                <EditButton onClick={() => openEdit(addon)} />
+   794→   794→                <DeleteConfirm label={addon.name} onConfirm={() => deleteMutation.mutate(addon.id)} />
+   795→   795→              </div>
+   796→   796→              <div className="min-w-0">
+   797→   797→                <p className="text-sm font-medium text-slate-900">{addon.name}</p>
+   798→   798→                <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{addon.description}</p>
+   799→   799→                <span className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-600">
+   800→   800→                  {categoryLabel(addon.category)}
+   801→   801→                </span>
+   802→   802→                {!addon.isActive && <span className="inline-block mt-1 ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-500">Inactive</span>}
+   803→   803→              </div>
+   804→   804→              <p className="text-sm font-bold text-slate-900 shrink-0">{formatINR(addon.feeInr)}</p>
+   805→   805→            </div>
+   806→   806→          ))}
+   807→   807→        </div>
+   808→   808→      )}
+   809→   809→
+   810→   810→      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+   811→   811→        <DialogContent className="sm:max-w-md">
+   812→   812→          <DialogHeader>
+   813→   813→            <DialogTitle>{editing ? 'Edit Add-on Service' : 'Add Add-on Service'}</DialogTitle>
+   814→   814→            <DialogDescription>{editing ? 'Update service details' : 'Create a new add-on service'}</DialogDescription>
+   815→   815→          </DialogHeader>
+   816→   816→          <div className="space-y-4 pt-2">
+   817→   817→            <FormField label="Name">
+   818→   818→              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Gap Analysis Workshop" />
+   819→   819→            </FormField>
+   820→   820→            <FormField label="Category">
+   821→   821→              <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as AddonCategory })}>
+   822→   822→                <SelectTrigger><SelectValue /></SelectTrigger>
+   823→   823→                <SelectContent>
+   824→   824→                  {ADDON_CATEGORIES.map((c) => (
+   825→   825→                    <SelectItem key={c} value={c}>{categoryLabel(c)}</SelectItem>
+   826→   826→                  ))}
+   827→   827→                </SelectContent>
+   828→   828→              </Select>
+   829→   829→            </FormField>
+   830→   830→            <FormField label="Description">
+   831→   831→              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Brief description..." rows={2} />
+   832→   832→            </FormField>
+   833→   833→            <FormField label="Fee (INR)">
+   834→   834→              <Input type="number" value={form.feeInr} onChange={(e) => setForm({ ...form, feeInr: parseFloat(e.target.value) || 0 })} />
+   835→   835→            </FormField>
+   836→   836→            <FormField label="Sort Order">
+   837→   837→              <Input type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+   838→   838→            </FormField>
+   839→   839→            <div className="flex items-center gap-2">
+   840→   840→              <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+   841→   841→              <Label className="text-xs text-slate-600">Active</Label>
+   842→   842→            </div>
+   843→   843→            <div className="flex justify-end gap-2 pt-2">
+   844→   844→              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+   845→   845→              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+   846→   846→                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+   847→   847→                {editing ? 'Update' : 'Create'}
+   848→   848→              </Button>
+   849→   849→            </div>
+   850→   850→          </div>
+   851→   851→        </DialogContent>
+   852→   852→      </Dialog>
+   853→   853→    </SectionCard>
+   854→   854→  )
+   855→   855→}
+   856→   856→
+   857→   857→// ─── 6. GRC Tools ─────────────────────────────────────────────
+   858→   858→
+   859→   859→function GrcSection({ tools }: { tools: GrcTool[] }) {
+   860→   860→  const qc = useQueryClient()
+   861→   861→  const [open, setOpen] = useState(false)
+   862→   862→  const [editing, setEditing] = useState<GrcTool | null>(null)
+   863→   863→  const [form, setForm] = useState({ planName: '', description: '', feeInrAnnual: 0, maxUsers: 100, isActive: true })
+   864→   864→
+   865→   865→  const resetForm = useCallback((t?: GrcTool) => {
+   866→   866→    if (t) setForm({ planName: t.planName, description: t.description ?? '', feeInrAnnual: t.feeInrAnnual, maxUsers: t.maxUsers, isActive: t.isActive })
+   867→   867→    else setForm({ planName: '', description: '', feeInrAnnual: 0, maxUsers: 100, isActive: true })
+   868→   868→  }, [])
+   869→   869→
+   870→   870→  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
+   871→   871→  const openEdit = (t: GrcTool) => { resetForm(t); setEditing(t); setOpen(true) }
+   872→   872→
+   873→   873→  const addMutation = useMutation({
+   874→   874→    mutationFn: (body: typeof form) => api.post<GrcTool>('/admin/grc-tools', body),
+   875→   875→    onSuccess: () => { toast.success('GRC tool added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   876→   876→    onError: (e: Error) => toast.error(e.message),
+   877→   877→  })
+   878→   878→
+   879→   879→  const editMutation = useMutation({
+   880→   880→    mutationFn: (body: Partial<typeof form>) => api.put<GrcTool>(`/admin/grc-tools/${editing!.id}`, body),
+   881→   881→    onSuccess: () => { toast.success('GRC tool updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   882→   882→    onError: (e: Error) => toast.error(e.message),
+   883→   883→  })
+   884→   884→
+   885→   885→  const deleteMutation = useMutation({
+   886→   886→    mutationFn: (id: string) => api.delete(`/admin/grc-tools/${id}`),
+   887→   887→    onSuccess: () => { toast.success('GRC tool deleted'); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   888→   888→    onError: (e: Error) => toast.error(e.message),
+   889→   889→  })
+   890→   890→
+   891→   891→  const handleSubmit = () => {
+   892→   892→    if (!form.planName.trim()) { toast.error('Plan name is required'); return }
+   893→   893→    if (editing) editMutation.mutate(form)
+   894→   894→    else addMutation.mutate(form)
+   895→   895→  }
+   896→   896→
+   897→   897→  return (
+   898→   898→    <SectionCard
+   899→   899→      title="GRC Tools"
+   900→   900→      description={`${tools.length} annual subscription plans`}
+   901→   901→      action={<Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={openAdd}><Plus className="h-4 w-4 mr-1" /> Add GRC Tool</Button>}
+   902→   902→    >
+   903→   903→      {tools.length === 0 ? (
+   904→   904→        <EmptyState title="No GRC tools" description="Add your first GRC tool plan" />
+   905→   905→      ) : (
+   906→   906→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+   907→   907→          {tools.map((tool) => (
+   908→   908→            <div key={tool.id} className="group relative rounded-lg border border-slate-200 p-4 hover:border-brand-300 transition-colors">
+   909→   909→              <div className="absolute top-3 right-3 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+   910→   910→                <EditButton onClick={() => openEdit(tool)} />
+   911→   911→                <DeleteConfirm label={tool.planName} onConfirm={() => deleteMutation.mutate(tool.id)} />
+   912→   912→              </div>
+   913→   913→              <p className="text-sm font-bold text-slate-900">{tool.planName}</p>
+   914→   914→              <p className="text-2xl font-bold text-brand-700 mt-1">{formatINR(tool.feeInrAnnual)}</p>
+   915→   915→              <p className="text-xs text-slate-500">/year</p>
+   916→   916→              <p className="text-xs text-slate-600 mt-2 line-clamp-2">{tool.description}</p>
+   917→   917→              <p className="text-xs text-slate-500 mt-2">
+   918→   918→                Up to {tool.maxUsers >= 999999 ? 'unlimited' : tool.maxUsers} users
+   919→   919→              </p>
+   920→   920→              {!tool.isActive && <span className="inline-block mt-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-500">Inactive</span>}
+   921→   921→            </div>
+   922→   922→          ))}
+   923→   923→        </div>
+   924→   924→      )}
+   925→   925→
+   926→   926→      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+   927→   927→        <DialogContent className="sm:max-w-md">
+   928→   928→          <DialogHeader>
+   929→   929→            <DialogTitle>{editing ? 'Edit GRC Tool' : 'Add GRC Tool'}</DialogTitle>
+   930→   930→            <DialogDescription>{editing ? 'Update GRC tool plan' : 'Create a new GRC tool subscription plan'}</DialogDescription>
+   931→   931→          </DialogHeader>
+   932→   932→          <div className="space-y-4 pt-2">
+   933→   933→            <FormField label="Plan Name">
+   934→   934→              <Input value={form.planName} onChange={(e) => setForm({ ...form, planName: e.target.value })} placeholder="e.g. VComply Starter" />
+   935→   935→            </FormField>
+   936→   936→            <FormField label="Description">
+   937→   937→              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Brief description..." rows={2} />
+   938→   938→            </FormField>
+   939→   939→            <FormField label="Annual Fee (INR)">
+   940→   940→              <Input type="number" value={form.feeInrAnnual} onChange={(e) => setForm({ ...form, feeInrAnnual: parseFloat(e.target.value) || 0 })} />
+   941→   941→            </FormField>
+   942→   942→            <FormField label="Max Users (999999 for unlimited)">
+   943→   943→              <Input type="number" value={form.maxUsers} onChange={(e) => setForm({ ...form, maxUsers: parseInt(e.target.value) || 0 })} />
+   944→   944→            </FormField>
+   945→   945→            <div className="flex items-center gap-2">
+   946→   946→              <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+   947→   947→              <Label className="text-xs text-slate-600">Active</Label>
+   948→   948→            </div>
+   949→   949→            <div className="flex justify-end gap-2 pt-2">
+   950→   950→              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+   951→   951→              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+   952→   952→                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+   953→   953→                {editing ? 'Update' : 'Create'}
+   954→   954→              </Button>
+   955→   955→            </div>
+   956→   956→          </div>
+   957→   957→        </DialogContent>
+   958→   958→      </Dialog>
+   959→   959→    </SectionCard>
+   960→   960→  )
+   961→   961→}
+   962→   962→
+   963→   963→// ─── 7. DPO / vCISO ────────────────────────────────────────────
+   964→   964→
+   965→   965→const DPO_TYPES: { value: DpoVcisoType; label: string }[] = [
+   966→   966→  { value: 'DPO', label: 'DPO' },
+   967→   967→  { value: 'vCISO', label: 'vCISO' },
+   968→   968→  { value: 'DPO_vCISO', label: 'DPO + vCISO Combined' },
+   969→   969→]
+   970→   970→
+   971→   971→function DpoSection({ packages }: { packages: DpoVcisoPackage[] }) {
+   972→   972→  const qc = useQueryClient()
+   973→   973→  const [open, setOpen] = useState(false)
+   974→   974→  const [editing, setEditing] = useState<DpoVcisoPackage | null>(null)
+   975→   975→  const [form, setForm] = useState({ serviceType: 'DPO' as DpoVcisoType, name: '', description: '', hoursPerMonth: 0, feeInrMonthly: 0, feeInrAnnual: 0, isActive: true })
+   976→   976→
+   977→   977→  const resetForm = useCallback((p?: DpoVcisoPackage) => {
+   978→   978→    if (p) setForm({ serviceType: p.serviceType, name: p.name, description: p.description ?? '', hoursPerMonth: p.hoursPerMonth, feeInrMonthly: p.feeInrMonthly, feeInrAnnual: p.feeInrAnnual, isActive: p.isActive })
+   979→   979→    else setForm({ serviceType: 'DPO', name: '', description: '', hoursPerMonth: 0, feeInrMonthly: 0, feeInrAnnual: 0, isActive: true })
+   980→   980→  }, [])
+   981→   981→
+   982→   982→  const openAdd = () => { resetForm(); setEditing(null); setOpen(true) }
+   983→   983→  const openEdit = (p: DpoVcisoPackage) => { resetForm(p); setEditing(p); setOpen(true) }
+   984→   984→
+   985→   985→  const addMutation = useMutation({
+   986→   986→    mutationFn: (body: typeof form) => api.post<DpoVcisoPackage>('/admin/dpo-vciso', body),
+   987→   987→    onSuccess: () => { toast.success('Package added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   988→   988→    onError: (e: Error) => toast.error(e.message),
+   989→   989→  })
+   990→   990→
+   991→   991→  const editMutation = useMutation({
+   992→   992→    mutationFn: (body: Partial<typeof form>) => api.put<DpoVcisoPackage>(`/admin/dpo-vciso/${editing!.id}`, body),
+   993→   993→    onSuccess: () => { toast.success('Package updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+   994→   994→    onError: (e: Error) => toast.error(e.message),
+   995→   995→  })
+   996→   996→
+   997→   997→  const deleteMutation = useMutation({
+   998→   998→    mutationFn: (id: string) => api.delete(`/admin/dpo-vciso/${id}`),
+   999→   999→    onSuccess: () => { toast.success('Package deleted'); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+  1000→  1000→    onError: (e: Error) => toast.error(e.message),
+  1001→  1001→  })
+  1002→  1002→
+  1003→  1003→  const handleSubmit = () => {
+  1004→  1004→    if (!form.name.trim()) { toast.error('Name is required'); return }
+  1005→  1005→    if (editing) editMutation.mutate(form)
+  1006→  1006→    else addMutation.mutate(form)
+  1007→  1007→  }
+  1008→  1008→
+  1009→  1009→  const grouped = packages.reduce((acc, pkg) => {
+  1010→  1010→    (acc[pkg.serviceType] ||= []).push(pkg)
+  1011→  1011→    return acc
+  1012→  1012→  }, {} as Record<string, DpoVcisoPackage[]>)
+  1013→  1013→
+  1014→  1014→  const typeLabel = (t: string) => DPO_TYPES.find((d) => d.value === t)?.label ?? t
+  1015→  1015→
+  1016→  1016→  return (
+  1017→  1017→    <SectionCard
+  1018→  1018→      title="DPO / vCISO Packages"
+  1019→  1019→      description={`${packages.length} managed compliance service plans`}
+  1020→  1020→      action={<Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={openAdd}><Plus className="h-4 w-4 mr-1" /> Add Package</Button>}
+  1021→  1021→    >
+  1022→  1022→      {packages.length === 0 ? (
+  1023→  1023→        <EmptyState title="No DPO/vCISO packages" description="Add your first managed service package" />
+  1024→  1024→      ) : (
+  1025→  1025→        <div className="space-y-5">
+  1026→  1026→          {Object.entries(grouped).map(([type, typePkgs]) => (
+  1027→  1027→            <div key={type}>
+  1028→  1028→              <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">{typeLabel(type)}</h4>
+  1029→  1029→              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+  1030→  1030→                {typePkgs.map((pkg) => (
+  1031→  1031→                  <div key={pkg.id} className="group relative rounded-lg border border-slate-200 p-4 hover:border-brand-300 transition-colors">
+  1032→  1032→                    <div className="absolute top-3 right-3 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+  1033→  1033→                      <EditButton onClick={() => openEdit(pkg)} />
+  1034→  1034→                      <DeleteConfirm label={pkg.name} onConfirm={() => deleteMutation.mutate(pkg.id)} />
+  1035→  1035→                    </div>
+  1036→  1036→                    <p className="text-sm font-bold text-slate-900">{pkg.name}</p>
+  1037→  1037→                    <p className="text-xs text-slate-500 mt-0.5">{pkg.hoursPerMonth} hours/month</p>
+  1038→  1038→                    <div className="mt-3 space-y-1">
+  1039→  1039→                      <div className="flex justify-between text-xs">
+  1040→  1040→                        <span className="text-slate-500">Monthly</span>
+  1041→  1041→                        <span className="font-medium text-slate-900">{formatINR(pkg.feeInrMonthly)}</span>
+  1042→  1042→                      </div>
+  1043→  1043→                      <div className="flex justify-between text-xs">
+  1044→  1044→                        <span className="text-slate-500">Annual</span>
+  1045→  1045→                        <span className="font-bold text-brand-700">{formatINR(pkg.feeInrAnnual)}</span>
+  1046→  1046→                      </div>
+  1047→  1047→                    </div>
+  1048→  1048→                    {!pkg.isActive && <span className="inline-block mt-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-500">Inactive</span>}
+  1049→  1049→                  </div>
+  1050→  1050→                ))}
+  1051→  1051→              </div>
+  1052→  1052→            </div>
+  1053→  1053→          ))}
+  1054→  1054→        </div>
+  1055→  1055→      )}
+  1056→  1056→
+  1057→  1057→      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null) }}>
+  1058→  1058→        <DialogContent className="sm:max-w-md">
+  1059→  1059→          <DialogHeader>
+  1060→  1060→            <DialogTitle>{editing ? 'Edit DPO/vCISO Package' : 'Add DPO/vCISO Package'}</DialogTitle>
+  1061→  1061→            <DialogDescription>{editing ? 'Update package details' : 'Create a new managed compliance service package'}</DialogDescription>
+  1062→  1062→          </DialogHeader>
+  1063→  1063→          <div className="space-y-4 pt-2">
+  1064→  1064→            <FormField label="Service Type">
+  1065→  1065→              <Select value={form.serviceType} onValueChange={(v) => setForm({ ...form, serviceType: v as DpoVcisoType })}>
+  1066→  1066→                <SelectTrigger><SelectValue /></SelectTrigger>
+  1067→  1067→                <SelectContent>
+  1068→  1068→                  {DPO_TYPES.map((d) => (
+  1069→  1069→                    <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
+  1070→  1070→                  ))}
+  1071→  1071→                </SelectContent>
+  1072→  1072→              </Select>
+  1073→  1073→            </FormField>
+  1074→  1074→            <FormField label="Name">
+  1075→  1075→              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. DPO Essential" />
+  1076→  1076→            </FormField>
+  1077→  1077→            <FormField label="Description">
+  1078→  1078→              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Brief description..." rows={2} />
+  1079→  1079→            </FormField>
+  1080→  1080→            <div className="grid grid-cols-2 gap-3">
+  1081→  1081→              <FormField label="Hours / Month">
+  1082→  1082→                <Input type="number" value={form.hoursPerMonth} onChange={(e) => setForm({ ...form, hoursPerMonth: parseFloat(e.target.value) || 0 })} />
+  1083→  1083→              </FormField>
+  1084→  1084→              <FormField label="Monthly Fee (INR)">
+  1085→  1085→                <Input type="number" value={form.feeInrMonthly} onChange={(e) => setForm({ ...form, feeInrMonthly: parseFloat(e.target.value) || 0 })} />
+  1086→  1086→              </FormField>
+  1087→  1087→            </div>
+  1088→  1088→            <FormField label="Annual Fee (INR)">
+  1089→  1089→              <Input type="number" value={form.feeInrAnnual} onChange={(e) => setForm({ ...form, feeInrAnnual: parseFloat(e.target.value) || 0 })} />
+  1090→  1090→            </FormField>
+  1091→  1091→            <div className="flex items-center gap-2">
+  1092→  1092→              <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+  1093→  1093→              <Label className="text-xs text-slate-600">Active</Label>
+  1094→  1094→            </div>
+  1095→  1095→            <div className="flex justify-end gap-2 pt-2">
+  1096→  1096→              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+  1097→  1097→              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+  1098→  1098→                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+  1099→  1099→                {editing ? 'Update' : 'Create'}
+  1100→  1100→              </Button>
+  1101→  1101→            </div>
+  1102→  1102→          </div>
+  1103→  1103→        </DialogContent>
+  1104→  1104→      </Dialog>
+  1105→  1105→    </SectionCard>
+  1106→  1106→  )
+  1107→  1107→}
+  1108→  1108→
+  1109→  1109→// ─── 8. FX Rate ────────────────────────────────────────────────
+  1110→  1110→
+  1111→  1111→function FxSection({ rate: currentRate }: { rate: number }) {
+  1112→  1112→  const qc = useQueryClient()
+  1113→  1113→  const [rate, setRate] = useState(currentRate)
+  1114→  1114→  const [editing, setEditing] = useState(false)
+  1115→  1115→
+  1116→  1116→  const updateMutation = useMutation({
+  1117→  1117→    mutationFn: (newRate: number) => api.put('/admin/fx-rate', { rate: newRate }),
+  1118→  1118→    onSuccess: () => {
+  1119→  1119→      toast.success('FX rate updated')
+  1120→  1120→      setEditing(false)
+  1121→  1121→      qc.invalidateQueries({ queryKey: ['pricing'] })
+  1122→  1122→      qc.invalidateQueries({ queryKey: ['dashboard'] })
+  1123→  1123→    },
+  1124→  1124→    onError: (e: Error) => toast.error(e.message),
+  1125→  1125→  })
+  1126→  1126→
+  1127→  1127→  return (
+  1128→  1128→    <SectionCard title="FX Rate" description="USD to INR conversion rate — used for USD equivalent on quotes">
+  1129→  1129→      <div className="max-w-md">
+  1130→  1130→        <div className="rounded-lg border border-slate-200 p-5">
+  1131→  1131→          <p className="text-xs text-slate-500 mb-1">Current USD/INR Rate</p>
+  1132→  1132→          <div className="flex items-baseline gap-2">
+  1133→  1133→            <span className="text-3xl font-bold text-slate-900">₹{rate}</span>
+  1134→  1134→            <span className="text-sm text-slate-500">per USD</span>
+  1135→  1135→          </div>
+  1136→  1136→
+  1137→  1137→          {editing ? (
+  1138→  1138→            <div className="mt-4 space-y-3">
+  1139→  1139→              <FormField label="New Rate">
+  1140→  1140→                <Input
+  1141→  1141→                  type="number"
+  1142→  1142→                  value={rate}
+  1143→  1143→                  onChange={(e) => setRate(parseFloat(e.target.value) || 0)}
+  1144→  1144→                  step="0.01"
+  1145→  1145→                />
+  1146→  1146→              </FormField>
+  1147→  1147→              <div className="flex gap-2">
+  1148→  1148→                <Button
+  1149→  1149→                  onClick={() => updateMutation.mutate(rate)}
+  1150→  1150→                  disabled={updateMutation.isPending}
+  1151→  1151→                  className="flex-1 bg-brand-700 hover:bg-brand-800 text-white"
+  1152→  1152→                  size="sm"
+  1153→  1153→                >
+  1154→  1154→                  {updateMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+  1155→  1155→                  <Check className="h-4 w-4 mr-1" /> Save
+  1156→  1156→                </Button>
+  1157→  1157→                <Button
+  1158→  1158→                  variant="outline"
+  1159→  1159→                  size="sm"
+  1160→  1160→                  onClick={() => { setRate(currentRate); setEditing(false) }}
+  1161→  1161→                >
+  1162→  1162→                  Cancel
+  1163→  1163→                </Button>
+  1164→  1164→              </div>
+  1165→  1165→            </div>
+  1166→  1166→          ) : (
+  1167→  1167→            <Button
+  1168→  1168→              variant="outline"
+  1169→  1169→              size="sm"
+  1170→  1170→              onClick={() => setEditing(true)}
+  1171→  1171→              className="mt-4"
+  1172→  1172→            >
+  1173→  1173→              <Pencil className="h-3.5 w-3.5 mr-1" /> Update Rate
+  1174→  1174→            </Button>
+  1175→  1175→          )}
+  1176→  1176→        </div>
+  1177→  1177→
+  1178→  1178→        <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 p-3">
+  1179→  1179→          <p className="text-xs text-amber-800">
+  1180→  1180→            <TrendingUp className="inline h-3.5 w-3.5 mr-1" />
+  1181→  1181→            This rate is snapshotted at quote creation time. Existing quotes retain their original rate.
+  1182→  1182→          </p>
+  1183→  1183→        </div>
+  1184→  1184→      </div>
+  1185→  1185→    </SectionCard>
+  1186→  1186→  )
+  1187→  1187→}

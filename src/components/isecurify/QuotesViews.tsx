@@ -8,7 +8,7 @@ import { api } from '@/lib/api-client'
 import { useNavStore, useAuthStore } from '@/store'
 import { TopBar } from '@/components/isecurify/Shell'
 import { StatusBadge, DealStageBadge, SectionCard, EmptyState } from '@/components/isecurify/Atoms'
-import { formatINR, formatUSD, formatDate, formatDateTime, formatRelativeTime } from '@/lib/currency'
+import { formatINR, formatUSD, formatDate, formatDateTime, formatRelativeTime, formatLineAmount } from '@/lib/currency'
 import { canPerformAction, getNextStatus } from '@/lib/quoteCalculator'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -205,7 +205,7 @@ export function QuotesListView() {
                       <td className="px-4 py-3 hidden md:table-cell text-slate-600">{getFrameworkNamesFromLines(q)}</td>
                       <td className="px-4 py-3"><StatusBadge status={q.status} /></td>
                       <td className="px-4 py-3 text-right">
-                        <p className="font-bold text-slate-900">{formatINR(q.totalInr)}</p>
+                        <p className="font-bold text-slate-900">{formatLineAmount(q.totalInr, q.billingCurrency, q.usdInrRateSnapshot)}</p>
                         <p className="text-xs text-slate-500">{formatUSD(q.totalUsd)}</p>
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-slate-500 text-xs">
@@ -468,7 +468,7 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
                     'text-sm font-semibold tabular-nums shrink-0',
                     line.amountInr < 0 ? 'text-rose-600' : 'text-slate-900',
                   )}>
-                    {line.amountInr < 0 ? '-' : ''}{formatINR(Math.abs(line.amountInr))}
+                    {line.amountInr < 0 ? '-' : ''}{formatLineAmount(Math.abs(line.amountInr), quote.billingCurrency, quote.usdInrRateSnapshot)}
                   </span>
                 </div>
               ))}
@@ -478,22 +478,22 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
             <div className="mt-4 pt-4 border-t border-slate-200 space-y-1.5">
               <div className="flex justify-between text-sm">
                 <span className="text-slate-600">Subtotal</span>
-                <span className="font-medium text-slate-900">{formatINR(quote.subtotalInr)}</span>
+                <span className="font-medium text-slate-900">{formatLineAmount(quote.subtotalInr, quote.billingCurrency, quote.usdInrRateSnapshot)}</span>
               </div>
               {quote.discountInr > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-rose-600">Discount ({quote.discountPct}%) {quote.discountReason ? `(${quote.discountReason})` : ''}</span>
-                  <span className="font-medium text-rose-600">-{formatINR(quote.discountInr)}</span>
+                  <span className="font-medium text-rose-600">-{formatLineAmount(quote.discountInr, quote.billingCurrency, quote.usdInrRateSnapshot)}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
                 <span className="text-slate-600">GST @ {quote.gstRateSnapshot}%</span>
-                <span className="font-medium text-slate-900">{formatINR(quote.gstAmountInr)}</span>
+                <span className="font-medium text-slate-900">{formatLineAmount(quote.gstAmountInr, quote.billingCurrency, quote.usdInrRateSnapshot)}</span>
               </div>
               <div className="flex justify-between items-baseline pt-2 border-t border-slate-200">
                 <span className="text-sm font-bold text-slate-900">Grand Total</span>
                 <div className="text-right">
-                  <p className="text-xl font-bold text-brand-700">{formatINR(quote.totalInr)}</p>
+                  <p className="text-xl font-bold text-brand-700">{formatLineAmount(quote.totalInr, quote.billingCurrency, quote.usdInrRateSnapshot)}</p>
                   <p className="text-xs text-slate-500">{formatUSD(quote.totalUsd)} @ ₹{quote.usdInrRateSnapshot}</p>
                 </div>
               </div>
@@ -532,9 +532,9 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
                         <span className="text-xs text-slate-400">• {formatDateTime(a.createdAt)}</span>
                       </div>
                       {a.comment && <p className="text-xs text-slate-600 mt-0.5 italic">"{a.comment}"</p>}
-                      {a.amountBefore !== undefined && a.amountAfter !== undefined && a.amountBefore !== a.amountAfter && (
+                      {a.amountBefore != null && a.amountAfter != null && a.amountBefore !== a.amountAfter && (
                         <p className="text-xs text-amber-600 mt-0.5">
-                          Amount: {formatINR(a.amountBefore)} → {formatINR(a.amountAfter)}
+                          Amount: {formatLineAmount(a.amountBefore!, quote.billingCurrency, quote.usdInrRateSnapshot)} → {formatLineAmount(a.amountAfter!, quote.billingCurrency, quote.usdInrRateSnapshot)}
                         </p>
                       )}
                     </div>
@@ -638,15 +638,15 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-600">Advance (40%)</span>
-                <span className="font-medium text-slate-900">{formatINR(quote.totalInr * 0.4)}</span>
+                <span className="font-medium text-slate-900">{formatLineAmount(quote.totalInr * 0.4, quote.billingCurrency, quote.usdInrRateSnapshot)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Midway (40%)</span>
-                <span className="font-medium text-slate-900">{formatINR(quote.totalInr * 0.4)}</span>
+                <span className="font-medium text-slate-900">{formatLineAmount(quote.totalInr * 0.4, quote.billingCurrency, quote.usdInrRateSnapshot)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">On Completion (20%)</span>
-                <span className="font-medium text-slate-900">{formatINR(quote.totalInr * 0.2)}</span>
+                <span className="font-medium text-slate-900">{formatLineAmount(quote.totalInr * 0.2, quote.billingCurrency, quote.usdInrRateSnapshot)}</span>
               </div>
               <div className="pt-2 border-t border-slate-200 text-xs text-slate-500">
                 <Clock className="inline h-3 w-3 mr-1" />

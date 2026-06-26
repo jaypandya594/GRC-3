@@ -76,7 +76,16 @@ export const useQuoteBuilderStore = create<QuoteBuilderState>()(
         set({ selection: DEFAULT_QUOTE_BUILDER_SELECTION, currentStep: 0 }),
       load: (selection) => set({ selection, currentStep: 0 }),
     }),
-    { name: 'isecurify-quote-builder' },
+    { name: 'isecurify-quote-builder',
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as object),
+        selection: {
+          ...DEFAULT_QUOTE_BUILDER_SELECTION,
+          ...(persisted as Record<string, unknown>).selection,
+        },
+      }),
+    },
   ),
 )
 

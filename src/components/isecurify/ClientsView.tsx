@@ -5,7 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
-import { useNavStore } from '@/store'
+import { useNavStore, useQuoteBuilderStore } from '@/store'
 import { TopBar } from '@/components/isecurify/Shell'
 import { DealStageBadge, SectionCard, EmptyState } from '@/components/isecurify/Atoms'
 import { formatRelativeTime } from '@/lib/currency'
@@ -26,6 +26,7 @@ const STAGES: DealStage[] = ['prospect', 'qualified', 'proposal_sent', 'negotiat
 
 export function ClientsView() {
   const { navigate } = useNavStore()
+  const updateQuoteBuilder = useQuoteBuilderStore((s) => s.update)
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
@@ -96,7 +97,10 @@ export function ClientsView() {
               <div
                 key={c.id}
                 className="rounded-xl border border-slate-200 bg-white p-5 hover:border-brand-400 hover:shadow-sm transition-all cursor-pointer"
-                onClick={() => navigate('quote-builder')}
+                onClick={() => {
+                  updateQuoteBuilder({ clientId: c.id })
+                  navigate('quote-builder')
+                }}
               >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700">

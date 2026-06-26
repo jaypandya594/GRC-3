@@ -1,10 +1,11 @@
 /**
  * /api/quote-pdf/[id]
  * GET — Generate a fully branded PDF for a quote with iSecurify branding
+ * Supports INR and USD billing currencies, live FX for non-finalized quotes.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { formatDate, formatINR, formatUSD } from '@/lib/currency'
+import { formatDate, formatINRPdf, formatUSD, formatLineAmountPdf } from '@/lib/currency'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +25,8 @@ const B = {
   white: [255, 255, 255] as const,
   border: [203, 213, 225] as const,
 }
+
+const FINALIZED_STATUSES = new Set(['SENT', 'APPROVED', 'VIEWED'])
 
 export async function GET(
   _req: NextRequest,
@@ -51,6 +54,36 @@ export async function GET(
     if (!quote) {
       return NextResponse.json({ error: 'Quote not found' }, { status: 404 })
     }
+
+    // For non-finalized quotes, recompute with live FX rate
+    let q = { ...quote }
+    if (!FINALIZED_STATUSES.has(quote.status)) {
+      const fx = await db.fxRate.findFirst()
+      const liveRate = fx?.rate ?? 83
+      const subtotalAfterDiscount = Math.max(0, q.subtotalInr - q.discountInr)
+      const newGst = q.billingCurrency === 'USD' ? 0 : Math.round(subtotalAfterDiscount * (q.gstRateSnapshot / 100))
+      const newTotal = subtotalAfterDiscount + newGst
+      const newUsd = Math.round((newTotal / liveRate) * 100) / 100
+
+      // Update the stored quote
+      await db.quote.update({
+        where: { id },
+        data: {
+          usdInrRateSnapshot: liveRate,
+          gstAmountInr: newGst,
+          totalInr: newTotal,
+          totalUsd: newUsd,
+        },
+      })
+
+      q.usdInrRateSnapshot = liveRate
+      q.gstAmountInr = newGst
+      q.totalInr = newTotal
+      q.totalUsd = newUsd
+    }
+
+    const isUsd = q.billingCurrency === 'USD'
+    const amtFmt = (n: number) => formatLineAmountPdf(n, q.billingCurrency, q.usdInrRateSnapshot)
 
     const { default: jsPDF } = await import('jspdf')
     const { default: autoTable } = await import('jspdf-autotable')
@@ -135,25 +168,35 @@ export async function GET(
     doc.setTextColor(...B.white)
     doc.setFontSize(9)
     doc.setFont('helvetica', 'normal')
-    doc.text(`Date: ${formatDate(quote.createdAt)}`, rX, headerTop + 14, { align: 'right' })
-    doc.text(`Valid Until: ${formatDate(quote.validUntil)}`, rX, headerTop + 21, { align: 'right' })
-    doc.text(`Version: ${quote.version}`, rX, headerTop + 28, { align: 'right' })
+    doc.text(`Date: ${formatDate(q.createdAt)}`, rX, headerTop + 14, { align: 'right' })
+    doc.text(`Valid Until: ${formatDate(q.validUntil)}`, rX, headerTop + 21, { align: 'right' })
+    doc.text(`Version: ${q.version}`, rX, headerTop + 28, { align: 'right' })
+
+    // Currency badge
+    doc.setFillColor(...B.teal)
+    const currBadgeW = 22
+    const currBadgeH = 6
+    const currBadgeY = headerTop + 33
+    doc.roundedRect(rX - currBadgeW, currBadgeY, currBadgeW, currBadgeH, 1.5, 1.5, 'F')
+    doc.setTextColor(...B.white)
+    doc.setFontSize(6.5)
+    doc.setFont('helvetica', 'bold')
+    doc.text(isUsd ? 'USD' : 'INR', rX - currBadgeW / 2, currBadgeY + 4.2, { align: 'center' })
 
     // Status badge
-    const statusText = (quote.status as string).replace(/_/g, ' ').toUpperCase()
-    const statusColor = quote.status === 'APPROVED' ? B.teal
-      : quote.status === 'REJECTED' ? [220, 38, 38] as const
-      : quote.status === 'SENT' ? B.blue
+    const statusText = (q.status as string).replace(/_/g, ' ').toUpperCase()
+    const statusColor = q.status === 'APPROVED' ? B.teal
+      : q.status === 'REJECTED' ? [220, 38, 38] as const
+      : q.status === 'SENT' ? B.blue
       : B.orange
     const sBadgeW = 40
     const sBadgeH = 8
     const sBadgeY = headerTop + 33
     doc.setFillColor(...statusColor)
-    doc.roundedRect(rX - sBadgeW, sBadgeY, sBadgeW, sBadgeH, 2, 2, 'F')
+    doc.roundedRect(rX - currBadgeW - sBadgeW - 4, sBadgeY, sBadgeW, sBadgeH, 2, 2, 'F')
     doc.setTextColor(...B.white)
     doc.setFontSize(7)
-    doc.setFont('helvetica', 'bold')
-    doc.text(statusText, rX - sBadgeW / 2, sBadgeY + 5.5, { align: 'center' })
+    doc.text(statusText, rX - currBadgeW - sBadgeW / 2 - 4, sBadgeY + 5.5, { align: 'center' })
 
     // ══════════════════════════════════════════════════════════
     // BODY CONTENT
@@ -165,10 +208,10 @@ export async function GET(
 
     doc.setFontSize(10)
     const clientRows: [string, string][] = [
-      ['Company Name', quote.client?.companyName || '—'],
-      ['Sector', quote.client?.sector || '—'],
-      ['Company Size', quote.client?.companySize || '—'],
-      ['Country', quote.client?.country || 'India'],
+      ['Company Name', q.client?.companyName || '—'],
+      ['Sector', q.client?.sector || '—'],
+      ['Company Size', q.client?.companySize || '—'],
+      ['Country', q.client?.country || 'India'],
     ]
 
     for (const [label, value] of clientRows) {
@@ -182,8 +225,8 @@ export async function GET(
 
     // Contacts
     let contacts: Array<{ name: string; email: string; phone?: string; role?: string }> = []
-    if (quote.client?.contactsJson) {
-      try { contacts = JSON.parse(quote.client.contactsJson) } catch { /* ignore */ }
+    if (q.client?.contactsJson) {
+      try { contacts = JSON.parse(q.client.contactsJson) } catch { /* ignore */ }
     }
     for (const c of contacts) {
       doc.setFont('helvetica', 'bold')
@@ -200,16 +243,13 @@ export async function GET(
     y = drawSectionTitle(doc, 'Compliance Services', mL, pageW, y, B.teal)
 
     // Show all frameworks from consulting_fee line items
-    const consultingLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'consulting_fee')
-    const retainerLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'retainer')
+    const consultingLines = (q.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'consulting_fee')
 
     doc.setFontSize(10)
     doc.setTextColor(...B.dark)
 
     if (consultingLines.length > 0) {
-      // Bulleted list of frameworks
       for (const cl of consultingLines) {
-        // Extract framework name from "Framework Name — Consulting Fee (Tier)"
         const fwName = cl.description.replace(/ — Consulting Fee.*/, '')
         doc.setFont('helvetica', 'bold')
         doc.text('•', mL + 2, y)
@@ -217,40 +257,45 @@ export async function GET(
         doc.text(fwName, mL + 7, y)
         y += 6
       }
-    } else if (quote.framework) {
-      doc.text(quote.framework.name, mL, y)
+    } else if (q.framework) {
+      doc.text(q.framework.name, mL, y)
       y += 6
     }
 
-    // Tier and FX Rate on the same row
+    // Tier (with description) and FX Rate
     const tierFxY = y + 2
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(...B.dark)
     doc.text('Tier:', mL, tierFxY)
     doc.setFont('helvetica', 'normal')
-    doc.text(quote.tier?.name || '—', mL + 14, tierFxY)
+    const tierLabel = q.tier?.name || '—'
+    const tierDesc = (q.tier as { description?: string | null } | undefined)?.description
+    doc.text(tierDesc ? `${tierLabel} (${tierDesc})` : tierLabel, mL + 14, tierFxY)
 
-    doc.setFont('helvetica', 'bold')
-    doc.text('FX Rate:', mL + 80, tierFxY)
-    doc.setFont('helvetica', 'normal')
-    doc.text(`USD/INR ${quote.usdInrRateSnapshot}`, mL + 100, tierFxY)
+    if (!isUsd) {
+      doc.setFont('helvetica', 'bold')
+      doc.text('FX Rate:', mL + 100, tierFxY)
+      doc.setFont('helvetica', 'normal')
+      doc.text(`USD/INR ${q.usdInrRateSnapshot}`, mL + 120, tierFxY)
+    }
     y = tierFxY + 10
 
     // ── Line Items Table ──
     y = drawSectionTitle(doc, 'Pricing Breakdown', mL, pageW, y, B.purple)
 
-    const billedLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType !== 'internal_time')
+    const billedLines = (q.lineItems || []).filter((l: { lineType: string }) => l.lineType !== 'internal_time')
+    const amountColLabel = isUsd ? 'Amount (USD)' : 'Amount (INR)'
 
     const tableBody = billedLines.map((item: { description: string; lineType: string; amountInr: number }, idx: number) => [
       String(idx + 1),
       item.description,
       item.lineType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
-      item.amountInr < 0 ? `-${formatINR(Math.abs(item.amountInr))}` : formatINR(item.amountInr),
+      item.amountInr < 0 ? `-${amtFmt(Math.abs(item.amountInr))}` : amtFmt(item.amountInr),
     ])
 
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Description', 'Type', 'Amount (INR)']],
+      head: [['#', 'Description', 'Type', amountColLabel]],
       body: tableBody,
       margin: { left: mL, right: mR },
       headStyles: {
@@ -271,8 +316,8 @@ export async function GET(
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
         1: { cellWidth: 'auto' },
-        2: { cellWidth: 32 },
-        3: { cellWidth: 36, halign: 'right' },
+        2: { cellWidth: 30 },
+        3: { cellWidth: 48, halign: 'right' },
       },
     })
 
@@ -293,23 +338,26 @@ export async function GET(
     doc.setFontSize(10)
     doc.setTextColor(...B.dark)
     doc.text('Subtotal', mL, y)
-    doc.text(formatINR(quote.subtotalInr), rightCol, y, { align: 'right' })
+    doc.text(amtFmt(q.subtotalInr), rightCol, y, { align: 'right' })
     y += 7
 
     // Discount
-    if (quote.discountInr > 0) {
-      const discLabel = quote.discountPct > 0 ? `Discount (${quote.discountPct}%)` : 'Discount'
+    if (q.discountInr > 0) {
+      const isFixed = q.discountMode === 'fixed'
+      const discLabel = isFixed ? 'Discount (Fixed)' : `Discount (${q.discountPct}%)`
       doc.setTextColor(220, 38, 38)
       doc.text(discLabel, mL, y)
-      doc.text(`-${formatINR(quote.discountInr)}`, rightCol, y, { align: 'right' })
+      doc.text(`-${amtFmt(q.discountInr)}`, rightCol, y, { align: 'right' })
       y += 7
     }
 
-    // GST
-    doc.setTextColor(...B.dark)
-    doc.text(`GST @ ${quote.gstRateSnapshot}%`, mL, y)
-    doc.text(formatINR(quote.gstAmountInr), rightCol, y, { align: 'right' })
-    y += 4
+    // GST (only for INR)
+    if (!isUsd) {
+      doc.setTextColor(...B.dark)
+      doc.text(`GST @ ${q.gstRateSnapshot}%`, mL, y)
+      doc.text(amtFmt(q.gstAmountInr), rightCol, y, { align: 'right' })
+      y += 4
+    }
 
     // Grand total highlight box
     y += 4
@@ -320,28 +368,37 @@ export async function GET(
     doc.setLineWidth(0.4)
     doc.roundedRect(mL, y, contentW, gtBoxH, 2, 2, 'S')
 
+    const totalLabel = isUsd ? 'Grand Total (USD)' : 'Grand Total (INR)'
     doc.setTextColor(...B.purple)
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(12)
-    doc.text('Grand Total (INR)', mL + 6, y + 8)
-    doc.text(formatINR(quote.totalInr), rightCol - 6, y + 8, { align: 'right' })
-    y += gtBoxH + 6
+    doc.text(totalLabel, mL + 6, y + 8)
+    doc.text(amtFmt(q.totalInr), rightCol - 6, y + 8, { align: 'right' })
+    y += gtBoxH + 4
 
-    // USD equivalent
-    doc.setTextColor(...B.muted)
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    doc.text(`Grand Total (USD): ${formatUSD(quote.totalUsd)} @ ₹${quote.usdInrRateSnapshot}`, mL, y)
-    y += 10
+    // Show the other currency as reference
+    if (isUsd) {
+      doc.setTextColor(...B.muted)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.text(`Equivalent INR: ${formatINRPdf(q.totalInr)} @ ${q.usdInrRateSnapshot}`, mL, y)
+      y += 10
+    } else {
+      doc.setTextColor(...B.muted)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      doc.text(`Grand Total (USD): ${formatUSD(q.totalUsd)} @ ${q.usdInrRateSnapshot}`, mL, y)
+      y += 10
+    }
 
     // Retainer note
-    if (quote.includeRetainer && quote.retainerAmountInr > 0) {
+    if (q.includeRetainer && q.retainerAmountInr > 0) {
       doc.setFillColor(...B.orangeLight)
       doc.roundedRect(mL, y, contentW, 9, 1.5, 1.5, 'F')
       doc.setTextColor(...B.orange)
       doc.setFontSize(8)
       doc.setFont('helvetica', 'bold')
-      doc.text(`Includes Annual Retainer: ${formatINR(quote.retainerAmountInr)}`, mL + 4, y + 6)
+      doc.text(`Includes Annual Retainer: ${amtFmt(q.retainerAmountInr)}`, mL + 4, y + 6)
       y += 14
     }
 
@@ -351,15 +408,15 @@ export async function GET(
     y += 2
 
     y = drawInfoCard(doc, mL, y, contentW, 'Created By', [
-      `${quote.createdBy?.name || 'System'} (${quote.createdBy?.role || 'N/A'})`,
-      quote.createdBy?.email || '',
+      `${q.createdBy?.name || 'System'} (${q.createdBy?.role || 'N/A'})`,
+      q.createdBy?.email || '',
     ], B.teal, B.tealLight)
 
     y += 3
-    if (quote.approvedBy) {
+    if (q.approvedBy) {
       y = drawInfoCard(doc, mL, y, contentW, 'Approved By', [
-        `${quote.approvedBy.name} (${quote.approvedBy.role || 'N/A'})`,
-        quote.approvedBy.email || '',
+        `${q.approvedBy.name} (${q.approvedBy.role || 'N/A'})`,
+        q.approvedBy.email || '',
       ], B.teal, B.tealLight)
     } else {
       y = drawInfoCard(doc, mL, y, contentW, 'Approved By', ['Pending Approval'], B.orange, B.orangeLight)
@@ -375,9 +432,9 @@ export async function GET(
       startY: y,
       head: [['Milestone', 'Amount']],
       body: [
-        ['Advance (40%)', formatINR(quote.totalInr * 0.4)],
-        ['Midway (40%)', formatINR(quote.totalInr * 0.4)],
-        ['On Completion (20%)', formatINR(quote.totalInr * 0.2)],
+        ['Advance (40%)', amtFmt(q.totalInr * 0.4)],
+        ['Midway (40%)', amtFmt(q.totalInr * 0.4)],
+        ['On Completion (20%)', amtFmt(q.totalInr * 0.2)],
       ],
       margin: { left: mL, right: mR },
       headStyles: {
@@ -405,16 +462,16 @@ export async function GET(
     y += 10
 
     // ── Approval Timeline ──
-    if (quote.approvals && quote.approvals.length > 0) {
+    if (q.approvals && q.approvals.length > 0) {
       if (y > 215) { doc.addPage(); y = 20; }
       y = drawSectionTitle(doc, 'Approval Timeline', mL, pageW, y, B.purple)
 
-      const timelineBody = quote.approvals.map((a: { action: string; actor: { name: string; role: string }; comment: string | null; createdAt: string; amountBefore: number | null; amountAfter: number | null }) => [
+      const timelineBody = q.approvals.map((a: { action: string; actor: { name: string; role: string }; comment: string | null; createdAt: string; amountBefore: number | null; amountAfter: number | null }) => [
         a.action.charAt(0).toUpperCase() + a.action.slice(1),
         a.actor?.name || 'System',
         a.comment || '—',
         a.amountBefore !== null && a.amountAfter !== null && a.amountBefore !== a.amountAfter
-          ? `${formatINR(a.amountBefore)} → ${formatINR(a.amountAfter)}`
+          ? `${amtFmt(a.amountBefore)} -> ${amtFmt(a.amountAfter)}`
           : '—',
         formatDate(a.createdAt),
       ])
@@ -454,7 +511,7 @@ export async function GET(
     }
 
     // ── Internal Time (Advisory — Not Billed) ──
-    const internalLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'internal_time')
+    const internalLines = (q.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'internal_time')
     if (internalLines.length > 0) {
       if (y > 235) { doc.addPage(); y = 20; }
 
@@ -474,14 +531,14 @@ export async function GET(
     }
 
     // ── Notes ──
-    if (quote.notes) {
+    if (q.notes) {
       if (y > 240) { doc.addPage(); y = 20; }
       y += 4
       y = drawSectionTitle(doc, 'Notes', mL, pageW, y, B.orange)
       doc.setTextColor(...B.dark)
       doc.setFontSize(9)
       doc.setFont('helvetica', 'normal')
-      const splitNotes = doc.splitTextToSize(quote.notes, contentW)
+      const splitNotes = doc.splitTextToSize(q.notes, contentW)
       doc.text(splitNotes, mL, y + 2)
     }
 
@@ -507,7 +564,7 @@ export async function GET(
       doc.setFontSize(7)
       doc.setFont('helvetica', 'normal')
       doc.text('Confidential — iSecurify GRC Pricing Platform', mL, ph - 8)
-      doc.text(`Valid until ${formatDate(quote.validUntil)}  |  Page ${i} of ${totalPages}`, pageW - mR, ph - 8, { align: 'right' })
+      doc.text(`Valid until ${formatDate(q.validUntil)}  |  Page ${i} of ${totalPages}`, pageW - mR, ph - 8, { align: 'right' })
     }
 
     const pdfBuffer = doc.output('arraybuffer')
