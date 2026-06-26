@@ -81,34 +81,29 @@ export async function GET(
     try {
       const fs = await import('fs')
       const path = await import('path')
-      const logoPath = path.join(process.cwd(), 'public', 'logo-full.png')
+      const logoPath = path.join(process.cwd(), 'public', 'logo-small.png')
       if (fs.existsSync(logoPath)) {
         const logoData = fs.readFileSync(logoPath)
         const logoB64 = logoData.toString('base64')
-        doc.addImage(logoB64, 'PNG', m, 10, 22, 22)
+        doc.addImage(logoB64, 'PNG', m, 10, 40, 18.3)
         logoAdded = true
       }
     } catch { /* fallback to text */ }
 
-    // Company name
-    doc.setTextColor(...BRAND.white)
-    doc.setFontSize(20)
-    doc.setFont('helvetica', 'bold')
-    doc.text('iSecurify', logoAdded ? m + 27 : m, 20)
-
+    // Wide logo already includes "iSecurify" text, so just add subtitle
     doc.setFontSize(9)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(210, 180, 200) // light purple
-    doc.text('GRC Compliance Proposal', logoAdded ? m + 27 : m, 27)
+    doc.text('GRC Compliance Proposal', logoAdded ? m + 45 : m, 24)
 
     // Quote ID badge
     doc.setFillColor(255, 255, 255)
     doc.setDrawColor(255, 255, 255)
-    doc.roundedRect(logoAdded ? m + 27 : m, 31, 60, 7, 1, 1, 'F')
+    doc.roundedRect(logoAdded ? m + 45 : m, 31, 60, 7, 1, 1, 'F')
     doc.setTextColor(...BRAND.purple)
     doc.setFontSize(8)
     doc.setFont('helvetica', 'bold')
-    doc.text(`QUOTE  ${id.slice(-8).toUpperCase()}`, (logoAdded ? m + 27 : m) + 4, 35.5)
+    doc.text(`QUOTE  ${id.slice(-8).toUpperCase()}`, (logoAdded ? m + 45 : m) + 4, 35.5)
 
     // Right side — meta info
     doc.setTextColor(...BRAND.white)

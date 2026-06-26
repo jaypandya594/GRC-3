@@ -97,3 +97,39 @@ Stage Summary:
 - Sales Manager: can submit, approve, reject, send, recall
 - Finance: can approve (PENDING_FINANCE), reject, override
 - Super Admin: full access including delete
+
+---
+Task ID: 3
+Agent: Main Orchestrator
+Task: Apply proper iSecurify branding with uploaded logo images
+
+Work Log:
+- LoginView.tsx: Replaced ShieldCheck icon with `/logo-small.png` (wide logo with text) using `next/image`, kept "GRC Pricing Platform" subtitle below
+- Shell.tsx sidebar: Replaced ShieldCheck icon in purple div with `/logo-full.png` (square icon) using `next/image`, removed ShieldCheck import, kept "iSecurify" text and subtitle
+- layout.tsx: Updated favicon icon from `/logo-small.png` to `/logo-full.png` (square format more appropriate for browser tab icon)
+- PDF route: Changed logo path from `public/logo-full.png` to `public/logo-small.png` (wide format), adjusted logo width from 22mm to 40mm (height 18.3mm to maintain aspect ratio), shifted text/badge right to m+45 to avoid overlap, removed redundant "iSecurify" text since wide logo already includes it
+
+Stage Summary:
+- All four files updated with proper iSecurify branding
+- No color changes — existing brand colors (Purple #812671, Teal #1B887D, Orange #C46C1D, Blue #146F9E) preserved
+- Lint passes cleanly
+
+---
+Task ID: 4
+Agent: Main Orchestrator
+Task: Add "Edit Name" feature for admins in User Management
+
+Work Log:
+- Verified PATCH /api/users/[id] already supports updating `name` field (no backend changes needed)
+- Imported `Pencil` icon from lucide-react
+- Added `editNameUser` and `editName` state variables to track editing context
+- Added `editNameMut` mutation that calls PATCH /api/users/[id] with { name }
+- Added Pencil (Edit Name) button BEFORE the Reset Password button in the actions column
+- Added Edit Name Dialog with: pre-filled name input, min 2 character validation, Save button with brand styling
+- Button only visible for users the current admin can manage (respects `canAct` logic)
+- Success toast on name update, invalidates ['users'] query to refresh table
+
+Stage Summary:
+- Admins (super_admin and sales_manager) can now edit user names via a pencil icon button
+- Validation ensures name is not empty and has at least 2 characters
+- Consistent styling with existing dialogs and actions

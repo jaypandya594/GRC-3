@@ -9,13 +9,13 @@ import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import type { UserRole } from '@/types'
+import Image from 'next/image'
 import {
   LayoutDashboard,
   FilePlus2,
   FileText,
   Users,
   Settings,
-  ShieldCheck,
   TrendingUp,
   UserCog,
   LogOut,
@@ -73,9 +73,13 @@ export function Sidebar() {
     <aside className="hidden md:flex w-64 flex-col border-r border-slate-200 bg-white shrink-0">
       {/* ── Header ─────────────────────────────────────────── */}
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-slate-200">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-700">
-          <ShieldCheck className="h-5 w-5 text-white" />
-        </div>
+        <Image
+          src="/logo-full.png"
+          alt="iSecurify"
+          width={32}
+          height={32}
+          className="h-8 w-8 rounded-md"
+        />
         <div className="flex flex-col leading-tight">
           <span className="text-sm font-bold text-slate-900">iSecurify</span>
           <span className="text-[11px] text-slate-500">GRC Pricing Platform</span>

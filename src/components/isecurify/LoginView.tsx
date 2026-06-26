@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ShieldCheck } from 'lucide-react'
+import Image from 'next/image'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
@@ -55,16 +55,20 @@ export function LoginView() {
     <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
       <Card className="w-full max-w-md shadow-lg border-slate-200">
         <CardHeader className="flex flex-col items-center gap-3 pb-2 pt-8">
-          <div className="flex items-center justify-center h-14 w-14 rounded-full bg-brand-50">
-            <ShieldCheck className="h-8 w-8 text-brand-700" />
-          </div>
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              iSecurify
-            </h1>
-            <p className="text-sm text-slate-500 mt-0.5">
-              GRC Pricing Platform
-            </p>
+          <div className="flex flex-col items-center gap-2">
+            <Image
+              src="/logo-small.png"
+              alt="iSecurify"
+              width={220}
+              height={100}
+              priority
+              className="h-auto w-48 sm:w-56"
+            />
+            <div className="text-center">
+              <p className="text-sm text-slate-500">
+                GRC Pricing Platform
+              </p>
+            </div>
           </div>
         </CardHeader>
 

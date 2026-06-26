@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   title: "iSecurify GRC Pricing Platform",
   description: "Governance, Risk & Compliance pricing and quoting platform",
   icons: {
-    icon: "/logo-small.png",
+    icon: "/logo-full.png",
   },
 };
 

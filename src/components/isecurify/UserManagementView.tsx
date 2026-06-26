@@ -16,6 +16,7 @@ import {
   Plus,
   Search,
   Key,
+  Pencil,
   Ban,
   ShieldCheck,
   Trash2,
@@ -115,6 +116,8 @@ export function UserManagementView() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [editNameUser, setEditNameUser] = useState<UserRow | null>(null)
+  const [editName, setEditName] = useState('')
   const [resetPwUser, setResetPwUser] = useState<UserRow | null>(null)
   const [deleteUser, setDeleteUser] = useState<UserRow | null>(null)
 
@@ -150,6 +153,18 @@ export function UserManagementView() {
       closeCreateDialog()
     },
     onError: (e: Error) => toast({ title: 'Create failed', description: e.message, variant: 'destructive' }),
+  })
+
+  const editNameMut = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api.patch<UserRow>(`/users/${id}`, { name }),
+    onSuccess: (u) => {
+      toast({ title: `Name updated to "${u.name}"` })
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      setEditNameUser(null)
+      setEditName('')
+    },
+    onError: (e: Error) => toast({ title: 'Update failed', description: e.message, variant: 'destructive' }),
   })
 
   const resetPassword = useMutation({
@@ -312,6 +327,15 @@ export function UserManagementView() {
                                   variant="ghost"
                                   size="icon"
                                   className="h-8 w-8 text-slate-500 hover:text-brand-700"
+                                  title="Edit Name"
+                                  onClick={() => { setEditNameUser(u); setEditName(u.name) }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-slate-500 hover:text-brand-700"
                                   title="Reset Password"
                                   onClick={() => { setResetPwUser(u); setResetPw(''); setResetPwConfirm('') }}
                                 >
@@ -404,6 +428,45 @@ export function UserManagementView() {
             >
               {createUser.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Create User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Name Dialog ── */}
+      <Dialog open={!!editNameUser} onOpenChange={(o) => !o && setEditNameUser(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Name — {editNameUser?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Full Name</Label>
+              <Input
+                placeholder="Enter new name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+              />
+              {editName.length > 0 && editName.trim().length < 2 && (
+                <p className="text-xs text-red-600">Name must be at least 2 characters</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditNameUser(null)}>Cancel</Button>
+            <Button
+              className="bg-brand-700 hover:bg-brand-800 text-white"
+              onClick={() => {
+                if (editName.trim().length < 2) {
+                  toast({ title: 'Validation error', description: 'Name must be at least 2 characters', variant: 'destructive' })
+                  return
+                }
+                if (editNameUser) editNameMut.mutate({ id: editNameUser.id, name: editName.trim() })
+              }}
+              disabled={editNameMut.isPending}
+            >
+              {editNameMut.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>
