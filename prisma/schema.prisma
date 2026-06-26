@@ -1,0 +1,420 @@
+// iSecurify GRC Pricing Platform — Prisma Schema
+// Adapted from the master build spec (MySQL) to SQLite.
+// Note: SQLite has no native ENUM or JSON type — we use String with app-level validation
+// and store JSON as String (serialized).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// 1. tenants — root organizations (iSecurify is the root tenant)
+// ============================================================
+model Tenant {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  name           String
+  logoUrl        String?
+  primaryColor   String?  @default("#0F766E")
+  secondaryColor String?
+  domain         String?
+  plan           String   @default("professional") // starter | professional | enterprise
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  users             User[]
+  frameworks        Framework[]
+  tiers             Tier[]
+  frameworkPrices   FrameworkPrice[]
+  auditorFees       AuditorFee[]
+  addonServices     AddonService[]
+  grcTools          GrcTool[]
+  dpoVcisoPackages  DpoVcisoPackage[]
+  clients           Client[]
+  quotes            Quote[]
+  sowDocuments      SowDocument[]
+  auditLogs         AuditLog[]
+}
+
+// ============================================================
+// 2. users — tenant-scoped users with role + 2FA
+// ============================================================
+model User {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  email                String
+  hashedPassword       String?
+  name                 String
+  role                 String    @default("viewer") // super_admin | tenant_admin | sales_manager | sales_executive | finance | viewer
+  totpSecret           String?
+  is2faEnabled         Boolean   @default(false)
+  isActive             Boolean   @default(true)
+  failedLoginAttempts  Int       @default(0)
+  lastLogin            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clientsCreated  Client[]
+  quotesCreated   Quote[]      @relation("QuoteCreatedBy")
+  quotesApproved  Quote[]      @relation("QuoteApprovedBy")
+  fxRateUpdates   FxRate[]
+  quoteApprovals  QuoteApproval[]
+  auditLogs       AuditLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+// ============================================================
+// 3. frameworks — compliance frameworks (global if tenantId null)
+// ============================================================
+model Framework {
+  id          String   @id @default(cuid())
+  tenantId    String?  // null = global
+  name        String
+  category    String   // IT_Security | Privacy | Quality | Food_Safety | Industry
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  frameworkPrices FrameworkPrice[]
+  quotes          Quote[]
+
+  @@index([tenantId])
+  @@index([category])
+}
+
+// ============================================================
+// 4. tiers — Startup / Mid-size / Enterprise (with retainer %)
+// ============================================================
+model Tier {
+  id          String   @id @default(cuid())
+  tenantId    String?  // null = global
+  name        String
+  retainerPct Float    @default(0) // 20.0 / 18.0 / 15.0
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  frameworkPrices FrameworkPrice[]
+  quotes          Quote[]
+
+  @@index([tenantId])
+}
+
+// ============================================================
+// 5. framework_prices — price matrix: framework × tier
+// ============================================================
+model FrameworkPrice {
+  id              String   @id @default(cuid())
+  tenantId        String?  // null = global
+  frameworkId     String
+  tierId          String
+  projectFeeInr   Float
+  retainerFeeInr  Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant    Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  framework Framework @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  tier      Tier      @relation(fields: [tierId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, frameworkId, tierId])
+  @@index([frameworkId])
+  @@index([tierId])
+}
+
+// ============================================================
+// 6. auditor_fees — pass-through certification body costs
+// ============================================================
+model AuditorFee {
+  id                String   @id @default(cuid())
+  tenantId          String?  // null = global
+  standardName      String
+  accreditationBody String
+  feeInr            Float
+  notes             String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([standardName])
+}
+
+// ============================================================
+// 7. addon_services — optional bolt-on services
+// ============================================================
+model AddonService {
+  id          String   @id @default(cuid())
+  tenantId    String?  // null = global
+  name        String
+  description String?
+  category    String   @default("advisory") // gap_analysis | documentation | training | audit | advisory
+  feeInr      Float
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+// ============================================================
+// 8. grc_tools — annual subscription plans
+// ============================================================
+model GrcTool {
+  id            String   @id @default(cuid())
+  tenantId      String?  // null = global
+  planName      String
+  description   String?
+  feeInrAnnual  Float
+  maxUsers      Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+// ============================================================
+// 9. dpo_vciso_packages — managed compliance service plans
+// ============================================================
+model DpoVcisoPackage {
+  id              String   @id @default(cuid())
+  tenantId        String?  // null = global
+  serviceType     String   // DPO | vCISO | DPO_vCISO
+  name            String
+  description     String?
+  hoursPerMonth   Int      @default(0)
+  feeInrMonthly   Float    @default(0)
+  feeInrAnnual    Float    @default(0)
+  scopeJson       String?  // serialized JSON
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+// ============================================================
+// 10. clients — prospect / customer companies
+// ============================================================
+model Client {
+  id           String   @id @default(cuid())
+  tenantId     String
+  companyName  String
+  sector       String?
+  companySize  String   @default("Mid-size") // Startup | Mid-size | Enterprise
+  country      String   @default("India")
+  contactsJson String?  // serialized JSON array of {name, email, phone, role}
+  dealStage    String   @default("prospect") // prospect | qualified | proposal_sent | negotiation | won | lost
+  notes        String?
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy    User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  quotes       Quote[]
+
+  @@index([tenantId])
+  @@index([dealStage])
+}
+
+// ============================================================
+// 11. quotes — the core pricing document with state machine
+// ============================================================
+model Quote {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  clientId             String
+  version              Int       @default(1)
+  status               String    @default("DRAFT") // DRAFT | PENDING_REVIEW | PENDING_FINANCE | APPROVED | SENT | VIEWED | EXPIRED | REJECTED
+  frameworkId          String
+  tierId               String
+  subtotalInr          Float     @default(0)
+  discountInr          Float     @default(0)
+  discountPct          Float     @default(0)
+  discountReason       String?
+  gstAmountInr         Float     @default(0)
+  totalInr             Float     @default(0)
+  totalUsd             Float     @default(0)
+  usdInrRateSnapshot   Float     @default(83)
+  gstRateSnapshot      Float     @default(18)
+  includeRetainer      Boolean   @default(false)
+  retainerAmountInr    Float     @default(0)
+  internalHours        Int       @default(0)
+  internalHourlyRate   Float     @default(0)
+  validUntil           DateTime?
+  notes                String?
+  createdById          String
+  approvedById         String?
+  sentAt               DateTime?
+  viewedAt             DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  framework   Framework   @relation(fields: [frameworkId], references: [id], onDelete: Restrict)
+  tier        Tier        @relation(fields: [tierId], references: [id], onDelete: Restrict)
+  createdBy   User        @relation("QuoteCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  approvedBy  User?       @relation("QuoteApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  lineItems   QuoteLineItem[]
+  approvals   QuoteApproval[]
+  sowDocuments SowDocument[]
+  portalTokens ClientPortalToken[]
+
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([status])
+}
+
+// ============================================================
+// 12. quote_line_items — individual priced lines on a quote
+// ============================================================
+model QuoteLineItem {
+  id           String   @id @default(cuid())
+  quoteId      String
+  lineType     String   // consulting_fee | auditor_fee | addon_service | grc_tool | dpo_vciso | retainer | discount | internal_time
+  description  String
+  referenceId  String?
+  amountInr    Float    @default(0)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+// ============================================================
+// 13. quote_approvals — audit trail of every state transition
+// ============================================================
+model QuoteApproval {
+  id            String   @id @default(cuid())
+  quoteId       String
+  actorId       String
+  actorRole     String
+  action        String   // submitted | approved | rejected | overridden | recalled | sent
+  comment       String?
+  amountBefore  Float?
+  amountAfter   Float?
+  createdAt     DateTime @default(now())
+
+  quote  Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  actor  User   @relation(fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+// ============================================================
+// 14. sow_documents — Statement of Work PDFs
+// ============================================================
+model SowDocument {
+  id           String    @id @default(cuid())
+  quoteId      String
+  tenantId     String
+  pdfPath      String?
+  pdfFilename  String?
+  status       String    @default("draft") // draft | generated | sent | signed
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  quote  Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+// ============================================================
+// 15. client_portal_tokens — public read-only access tokens
+// ============================================================
+model ClientPortalToken {
+  id            String    @id @default(cuid())
+  quoteId       String
+  tokenHash     String    @unique
+  expiresAt     DateTime
+  viewedAt      DateTime?
+  downloadedAt  DateTime?
+  createdAt     DateTime @default(now())
+
+  quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId])
+}
+
+// ============================================================
+// 16. audit_log — immutable record of every mutating action
+// ============================================================
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  oldValue   String?  // serialized JSON
+  newValue   String?  // serialized JSON
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, entity, entityId])
+  @@index([tenantId, createdAt])
+}
+
+// ============================================================
+// 17. fx_rates — USD/INR exchange rate (single row, id=1)
+// ============================================================
+model FxRate {
+  id         Int      @id @default(1)
+  currencyPair String @default("USD_INR")
+  rate       Float
+  updatedById String?
+  updatedAt  DateTime @updatedAt
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+// ============================================================
+// 18. uploaded_documents — general file uploads
+// ============================================================
+model UploadedDocument {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  entity      String   // framework | tier | auditor_fee | addon_service | grc_tool | dpo_vciso | client | quote
+  entityId    String?
+  filename    String
+  originalName String
+  mimeType    String
+  size        Int      @default(0)
+  filePath    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

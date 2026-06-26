@@ -1,0 +1,1995 @@
+# iSecurify GRC Pricing Calculator — Chat Z AI Master Prompt (v2)
+
+## Stack: React + Python (FastAPI) + MySQL + Nginx / Apache2 on Ubuntu
+Server
+
+---
+
+## 1. WHAT YOU ARE BUILDING
+
+**iSecurify** is a private, internal GRC (Governance, Risk & Compliance)
+pricing calculator and quote management platform. It is used **only** by
+iSecurify's own team — Sales Executives, Sales Managers, and the
+CTO/leadership. There is no public sign-up or client self-serve portal.
+
+### Core features
+
+- **Quote Builder** — 6-step wizard to build a priced compliance
+proposal (framework → tier → auditor fees → add-ons → GRC tools /
+DPO/vCISO → review & submit)
+
+- **Quote Workflow** — state machine: DRAFT → PENDING_REVIEW →
+PENDING_FINANCE → APPROVED → SENT
+
+- **Clients CRM** — lightweight prospect/customer tracker
+
+- **Admin Panel** — pricing configuration (frameworks, tiers, price
+matrix, auditor fees, add-ons, GRC tools, DPO packages, FX rate)
+
+- **PDF Export** — professionally branded A4 quote PDF (logo, line
+items, totals, payment terms, approval trail)
+
+- **Dashboard** — pipeline metrics, revenue chart by month, top
+frameworks, recent quotes
+
+- **User Management** — Super Admin and Admin can create users, reset
+passwords, block/unblock, and delete users (with scope restrictions per
+role)
+
+- **Role-Based Access** — 3 roles: Super Admin, Admin (Sales Manager),
+User (Sales Executive)
+
+---
+
+## 2. FULL TECH STACK
+
+| Layer | Technology |
+
+|---|---|
+
+| **Frontend** | React 18 (Vite), TypeScript, Tailwind CSS v3, shadcn/ui
+components |
+
+| **State** | Zustand (global), TanStack React Query v5 (server state +
+caching) |
+
+| **Backend API** | Python 3.11+, FastAPI, Uvicorn |
+
+| **ORM** | SQLAlchemy 2.x with Alembic migrations |
+
+| **Database** | MySQL 8.0 |
+
+| **Auth** | JWT (python-jose) + bcrypt password hashing, HTTP-only
+cookie sessions |
+
+| **PDF** | WeasyPrint (Python server-side PDF) |
+
+| **Web Server** | Nginx (primary recommendation) **or** Apache2
+(alternative) |
+
+| **OS** | Ubuntu Server 22.04 LTS |
+
+| **Process Manager** | systemd (production) |
+
+| **Charts** | Recharts |
+
+---
+
+## 3. DIRECTORY STRUCTURE
+
+```
+
+isecurify/
+
+├── backend/
+
+│ ├── main.py ← FastAPI app entry point
+
+│ ├── config.py ← Settings loaded from .env
+
+│ ├── database.py ← SQLAlchemy engine + session
+
+│ ├── models/ ← SQLAlchemy ORM models
+
+│ │ ├── __init__.py
+
+│ │ ├── tenant.py
+
+│ │ ├── user.py
+
+│ │ ├── framework.py
+
+│ │ ├── tier.py
+
+│ │ ├── framework_price.py
+
+│ │ ├── auditor_fee.py
+
+│ │ ├── addon_service.py
+
+│ │ ├── grc_tool.py
+
+│ │ ├── dpo_vciso_package.py
+
+│ │ ├── client.py
+
+│ │ ├── quote.py
+
+│ │ ├── quote_line_item.py
+
+│ │ ├── quote_approval.py
+
+│ │ ├── fx_rate.py
+
+│ │ └── audit_log.py
+
+│ ├── schemas/ ← Pydantic v2 request/response schemas
+
+│ │ ├── auth.py
+
+│ │ ├── user.py
+
+│ │ ├── framework.py
+
+│ │ ├── quote.py
+
+│ │ ├── client.py
+
+│ │ └── dashboard.py
+
+│ ├── routers/ ← FastAPI APIRouter modules
+
+│ │ ├── auth.py ← POST /api/auth/login, /logout, /me
+
+│ │ ├── users.py ← CRUD /api/users (super_admin: full; sales_manager:
+scoped)
+
+│ │ ├── pricing.py ← GET /api/pricing (frameworks, tiers, etc.)
+
+│ │ ├── quotes.py ← CRUD + actions /api/quotes
+
+│ │ ├── clients.py ← CRUD /api/clients
+
+│ │ ├── dashboard.py ← GET /api/dashboard
+
+│ │ ├── quote_pdf.py ← GET /api/quotes/{id}/pdf
+
+│ │ └── admin/
+
+│ │ ├── frameworks.py
+
+│ │ ├── tiers.py
+
+│ │ ├── framework_prices.py
+
+│ │ ├── auditor_fees.py
+
+│ │ ├── addon_services.py
+
+│ │ ├── grc_tools.py
+
+│ │ ├── dpo_vciso.py
+
+│ │ └── fx_rate.py
+
+│ ├── services/
+
+│ │ ├── auth_service.py ← JWT creation, token verify, bcrypt
+
+│ │ ├── quote_calculator.py ← Pricing engine (mirrors frontend logic)
+
+│ │ └── pdf_service.py ← WeasyPrint PDF generation
+
+│ ├── seed.py ← Master data + demo users seeder
+
+│ ├── requirements.txt
+
+│ └── alembic/ ← DB migrations
+
+│ ├── env.py
+
+│ └── versions/
+
+│
+
+├── frontend/
+
+│ ├── index.html
+
+│ ├── vite.config.ts
+
+│ ├── tailwind.config.ts
+
+│ ├── src/
+
+│ │ ├── main.tsx
+
+│ │ ├── App.tsx ← Route definitions + auth guard
+
+│ │ ├── types/index.ts ← TypeScript interfaces
+
+│ │ ├── lib/
+
+│ │ │ ├── api.ts ← Axios instance with JWT interceptor
+
+│ │ │ ├── currency.ts ← INR/USD formatters, lakh format
+
+│ │ │ └── quoteCalculator.ts ← Client-side pricing calculation
+
+│ │ ├── store/
+
+│ │ │ ├── authStore.ts ← Zustand: user session
+
+│ │ │ ├── navStore.ts ← Zustand: current view
+
+│ │ │ └── quoteBuilderStore.ts ← Zustand: in-progress quote
+
+│ │ ├── components/
+
+│ │ │ ├── layout/
+
+│ │ │ │ ├── Shell.tsx ← Sidebar + MobileNav + TopBar
+
+│ │ │ │ └── ProtectedRoute.tsx
+
+│ │ │ ├── ui/ ← shadcn/ui components
+
+│ │ │ └── isecurify/
+
+│ │ │ ├── Atoms.tsx
+
+│ │ │ ├── DashboardView.tsx
+
+│ │ │ ├── QuoteBuilderView.tsx
+
+│ │ │ ├── QuotesViews.tsx
+
+│ │ │ ├── ClientsView.tsx
+
+│ │ │ ├── AdminView.tsx
+
+│ │ │ └── UserManagementView.tsx
+
+│ │ └── pages/
+
+│ │ └── LoginPage.tsx
+
+│
+
+├── nginx/
+
+│ └── isecurify.conf ← Nginx site config
+
+├── apache2/
+
+│ └── isecurify.conf ← Apache2 VirtualHost config (alternative)
+
+├── .env ← Environment variables (see Section 6)
+
+└── README.md
+
+```
+
+---
+
+## 4. DATABASE SCHEMA (MySQL 8.0)
+
+Use these exact table and column names. All IDs are `VARCHAR(36)` CUID
+strings. Use `BIGINT UNSIGNED AUTO_INCREMENT` for `fx_rates.id` only.
+
+### Tables
+
+**tenants**
+
+```sql
+
+id VARCHAR(36) PK, slug VARCHAR(100) UNIQUE, name VARCHAR(255),
+
+logo_url TEXT, primary_color VARCHAR(20) DEFAULT '#812671',
+
+secondary_color VARCHAR(20), domain VARCHAR(255),
+
+plan ENUM('starter','professional','enterprise') DEFAULT 'professional',
+
+is_active BOOLEAN DEFAULT TRUE, created_at DATETIME, updated_at DATETIME
+
+```
+
+**users**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) FK→tenants,
+
+email VARCHAR(255), hashed_password VARCHAR(255), name VARCHAR(255),
+
+role
+ENUM('super_admin','tenant_admin','sales_manager','sales_executive','finance','viewer')
+DEFAULT 'viewer',
+
+totp_secret VARCHAR(255), is_2fa_enabled BOOLEAN DEFAULT FALSE,
+
+is_active BOOLEAN DEFAULT TRUE, failed_login_attempts INT DEFAULT 0,
+
+last_login DATETIME, created_at DATETIME, updated_at DATETIME,
+
+UNIQUE(tenant_id, email)
+
+```
+
+**frameworks**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) NULL FK→tenants,
+
+name VARCHAR(255), category
+ENUM('IT_Security','Privacy','Quality','Food_Safety','Industry'),
+
+description TEXT, is_active BOOLEAN DEFAULT TRUE, sort_order INT DEFAULT
+0,
+
+created_at DATETIME, updated_at DATETIME
+
+```
+
+**tiers**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) NULL FK→tenants,
+
+name VARCHAR(100), retainer_pct DECIMAL(5,2) DEFAULT 0,
+
+sort_order INT DEFAULT 0, is_active BOOLEAN DEFAULT TRUE,
+
+created_at DATETIME, updated_at DATETIME
+
+```
+
+**framework_prices**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) NULL FK→tenants,
+
+framework_id VARCHAR(36) FK→frameworks, tier_id VARCHAR(36) FK→tiers,
+
+project_fee_inr DECIMAL(14,2), retainer_fee_inr DECIMAL(14,2) DEFAULT 0,
+
+created_at DATETIME, updated_at DATETIME,
+
+UNIQUE(tenant_id, framework_id, tier_id)
+
+```
+
+**auditor_fees**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) NULL FK→tenants,
+
+standard_name VARCHAR(255), accreditation_body VARCHAR(255),
+
+fee_inr DECIMAL(14,2), notes TEXT, is_active BOOLEAN DEFAULT TRUE,
+
+created_at DATETIME, updated_at DATETIME
+
+```
+
+**addon_services**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) NULL FK→tenants,
+
+name VARCHAR(255), description TEXT,
+
+category
+ENUM('gap_analysis','documentation','training','audit','advisory')
+DEFAULT 'advisory',
+
+fee_inr DECIMAL(14,2), is_active BOOLEAN DEFAULT TRUE,
+
+sort_order INT DEFAULT 0, created_at DATETIME, updated_at DATETIME
+
+```
+
+**grc_tools**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) NULL FK→tenants,
+
+plan_name VARCHAR(100), description TEXT,
+
+fee_inr_annual DECIMAL(14,2), max_users INT DEFAULT 0,
+
+is_active BOOLEAN DEFAULT TRUE, created_at DATETIME, updated_at DATETIME
+
+```
+
+**dpo_vciso_packages**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) NULL FK→tenants,
+
+service_type ENUM('DPO','vCISO','DPO_vCISO'),
+
+name VARCHAR(100), description TEXT, hours_per_month INT DEFAULT 0,
+
+fee_inr_monthly DECIMAL(14,2) DEFAULT 0, fee_inr_annual DECIMAL(14,2)
+DEFAULT 0,
+
+scope_json JSON, is_active BOOLEAN DEFAULT TRUE,
+
+created_at DATETIME, updated_at DATETIME
+
+```
+
+**clients**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) FK→tenants,
+
+company_name VARCHAR(255), sector VARCHAR(100),
+
+company_size ENUM('Startup','Mid-size','Enterprise') DEFAULT 'Mid-size',
+
+country VARCHAR(100) DEFAULT 'India',
+
+contacts_json JSON,
+
+deal_stage
+ENUM('prospect','qualified','proposal_sent','negotiation','won','lost')
+DEFAULT 'prospect',
+
+notes TEXT, created_by_id VARCHAR(36) FK→users,
+
+created_at DATETIME, updated_at DATETIME
+
+```
+
+**quotes**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) FK→tenants,
+
+client_id VARCHAR(36) FK→clients, version INT DEFAULT 1,
+
+status
+ENUM('DRAFT','PENDING_REVIEW','PENDING_FINANCE','APPROVED','SENT','VIEWED','EXPIRED','REJECTED')
+DEFAULT 'DRAFT',
+
+framework_id VARCHAR(36) FK→frameworks, tier_id VARCHAR(36) FK→tiers,
+
+subtotal_inr DECIMAL(14,2) DEFAULT 0, discount_inr DECIMAL(14,2) DEFAULT
+0,
+
+discount_pct DECIMAL(5,2) DEFAULT 0, discount_reason TEXT,
+
+gst_amount_inr DECIMAL(14,2) DEFAULT 0, total_inr DECIMAL(14,2) DEFAULT
+0,
+
+total_usd DECIMAL(14,2) DEFAULT 0,
+
+usd_inr_rate_snapshot DECIMAL(8,2) DEFAULT 83,
+
+gst_rate_snapshot DECIMAL(5,2) DEFAULT 18,
+
+include_retainer BOOLEAN DEFAULT FALSE, retainer_amount_inr
+DECIMAL(14,2) DEFAULT 0,
+
+internal_hours INT DEFAULT 0, internal_hourly_rate DECIMAL(10,2) DEFAULT
+0,
+
+valid_until DATETIME, notes TEXT,
+
+created_by_id VARCHAR(36) FK→users, approved_by_id VARCHAR(36) NULL
+FK→users,
+
+sent_at DATETIME, viewed_at DATETIME, created_at DATETIME, updated_at
+DATETIME
+
+```
+
+**quote_line_items**
+
+```sql
+
+id VARCHAR(36) PK, quote_id VARCHAR(36) FK→quotes,
+
+line_type
+ENUM('consulting_fee','auditor_fee','addon_service','grc_tool','dpo_vciso','retainer','discount','internal_time'),
+
+description TEXT, reference_id VARCHAR(36), amount_inr DECIMAL(14,2)
+DEFAULT 0,
+
+sort_order INT DEFAULT 0, created_at DATETIME
+
+```
+
+**quote_approvals**
+
+```sql
+
+id VARCHAR(36) PK, quote_id VARCHAR(36) FK→quotes,
+
+actor_id VARCHAR(36) FK→users, actor_role VARCHAR(50),
+
+action
+ENUM('submitted','approved','rejected','overridden','recalled','sent'),
+
+comment TEXT, amount_before DECIMAL(14,2), amount_after DECIMAL(14,2),
+
+created_at DATETIME
+
+```
+
+**fx_rates**
+
+```sql
+
+id BIGINT UNSIGNED AUTO_INCREMENT PK, currency_pair VARCHAR(20) DEFAULT
+'USD_INR',
+
+rate DECIMAL(8,4), updated_by_id VARCHAR(36) NULL FK→users, updated_at
+DATETIME
+
+```
+
+**audit_logs**
+
+```sql
+
+id VARCHAR(36) PK, tenant_id VARCHAR(36) FK→tenants,
+
+user_id VARCHAR(36) NULL FK→users, action VARCHAR(100),
+
+entity VARCHAR(100), entity_id VARCHAR(36),
+
+old_value JSON, new_value JSON,
+
+ip_address VARCHAR(45), user_agent TEXT, created_at DATETIME
+
+```
+
+---
+
+## 5. USER ROLES & PERMISSIONS
+
+### 🔴 Super Admin
+
+**Seed:** `admin@isecurify.in` / `Admin@iSecurify2025!`
+
+Full access to everything:
+
+- All Admin Panel sections (frameworks, tiers, prices, auditor fees,
+add-ons, GRC tools, DPO/vCISO, FX rate)
+
+- **Full User Management:** create any user with any role, reset any
+password, block/unblock any user, permanently delete any user (hard
+delete, with confirmation modal)
+
+- Cannot delete their own account
+
+- View, approve, reject, or override **any** quote at any stage
+
+- Access Audit Log (every action across all users)
+
+- Edit tenant branding (logo, colors)
+
+- Export any data
+
+### 🟡 Admin — Sales Manager
+
+**Seed:** `sales.manager@isecurify.in` / `Sales@Manager2025!`
+
+- Create and manage clients
+
+- Create, edit, submit quotes for approval
+
+- View **all** quotes (across all Sales Executives)
+
+- **First-level approval** of Sales Executive quotes (PENDING_REVIEW →
+PENDING_FINANCE or APPROVED)
+
+- Download PDF for any quote they can view
+
+- **Scoped User Management:**
+
+- ✅ Create new users with roles `sales_executive`, `finance`, or
+`viewer` only (cannot create another `sales_manager` or `super_admin`)
+
+- ✅ Reset password for any `sales_executive`, `finance`, or `viewer`
+user
+
+- ✅ Block (deactivate) or unblock any `sales_executive`, `finance`, or
+`viewer` user
+
+- ✅ Delete any `sales_executive`, `finance`, or `viewer` user (hard
+delete, with confirmation modal)
+
+- ❌ Cannot create, edit, block, or delete `sales_manager` or
+`super_admin` accounts
+
+- ❌ Cannot change their own role
+
+- ❌ Cannot access Admin Panel pricing config
+
+### 🟢 User — Sales Executive
+
+**Seed:** `sales.exec@isecurify.in` / `Sales@Exec2025!`
+
+- Create and manage their **own** clients
+
+- Create quotes, save as DRAFT
+
+- Submit quotes for Sales Manager review
+
+- View **only their own** quotes
+
+- Download PDF for their own quotes
+
+- ❌ Cannot approve any quote
+
+- ❌ Cannot see other users' quotes
+
+### 🔵 Finance
+
+**Seed:** `finance@isecurify.in` / `Finance@iSecurify2025!`
+
+- View all quotes (read-only)
+
+- Download any PDF
+
+- Approve the `PENDING_FINANCE` stage only
+
+- ❌ Cannot create quotes, clients, or access Admin Panel
+
+---
+
+## 6. ENVIRONMENT VARIABLES (.env)
+
+Create this file at the project root. **Never commit it to git.**
+
+```env
+
+# ─── Application ───────────────────────────────────────────────
+
+APP_ENV=production
+
+APP_NAME=iSecurify
+
+APP_HOST=0.0.0.0
+
+APP_PORT=8000
+
+FRONTEND_URL=http://YOUR_SERVER_IP_OR_DOMAIN
+
+# ─── Security ──────────────────────────────────────────────────
+
+SECRET_KEY=CHANGE_THIS_TO_A_RANDOM_64_CHARACTER_HEX_STRING
+
+ALGORITHM=HS256
+
+ACCESS_TOKEN_EXPIRE_MINUTES=480
+
+REFRESH_TOKEN_EXPIRE_DAYS=7
+
+BCRYPT_ROUNDS=12
+
+# ─── Database ──────────────────────────────────────────────────
+
+DB_HOST=127.0.0.1
+
+DB_PORT=3306
+
+DB_NAME=isecurify
+
+DB_USER=isecurify_user
+
+DB_PASSWORD=CHANGE_THIS_STRONG_PASSWORD
+
+DATABASE_URL=mysql+pymysql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+
+# ─── iSecurify Tenant ──────────────────────────────────────────
+
+TENANT_ID=tenant-isecurify
+
+TENANT_SLUG=isecurify
+
+TENANT_NAME=iSecurify
+
+TENANT_DOMAIN=isecurify.in
+
+# ─── Pricing Defaults ──────────────────────────────────────────
+
+DEFAULT_GST_RATE=18
+
+DEFAULT_USD_INR_RATE=83
+
+# ─── PDF ───────────────────────────────────────────────────────
+
+PDF_LOGO_PATH=/var/www/isecurify/backend/static/logo-full.png
+
+PDF_COMPANY_NAME=iSecurify
+
+PDF_COMPANY_TAGLINE=GRC Compliance Solutions
+
+# ─── File Uploads ──────────────────────────────────────────────
+
+UPLOAD_DIR=/var/www/isecurify/uploads
+
+MAX_UPLOAD_MB=10
+
+# ─── CORS ──────────────────────────────────────────────────────
+
+CORS_ORIGINS=["http://YOUR_SERVER_IP_OR_DOMAIN","http://localhost:5173"]
+
+```
+
+Generate SECRET_KEY on Ubuntu with:
+
+```bash
+
+python3 -c "import secrets; print(secrets.token_hex(64))"
+
+```
+
+---
+
+## 7. BACKEND — FastAPI
+
+### `backend/main.py`
+
+```python
+
+from fastapi import FastAPI
+
+from fastapi.middleware.cors import CORSMiddleware
+
+from config import settings
+
+from routers import auth, users, pricing, quotes, clients, dashboard,
+quote_pdf
+
+from routers.admin import frameworks, tiers, framework_prices,
+auditor_fees, addon_services, grc_tools, dpo_vciso, fx_rate
+
+app = FastAPI(title="iSecurify API", version="1.0.0")
+
+app.add_middleware(
+
+CORSMiddleware,
+
+allow_origins=settings.CORS_ORIGINS,
+
+allow_credentials=True,
+
+allow_methods=["*"],
+
+allow_headers=["*"],
+
+)
+
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
+app.include_router(users.router, prefix="/api/users", tags=["users"])
+
+app.include_router(pricing.router, prefix="/api/pricing",
+tags=["pricing"])
+
+app.include_router(quotes.router, prefix="/api/quotes", tags=["quotes"])
+
+app.include_router(clients.router, prefix="/api/clients",
+tags=["clients"])
+
+app.include_router(dashboard.router, prefix="/api/dashboard",
+tags=["dashboard"])
+
+app.include_router(quote_pdf.router, prefix="/api/quotes", tags=["pdf"])
+
+app.include_router(frameworks.router, prefix="/api/admin/frameworks",
+tags=["admin"])
+
+app.include_router(tiers.router, prefix="/api/admin/tiers",
+tags=["admin"])
+
+app.include_router(framework_prices.router,
+prefix="/api/admin/framework-prices", tags=["admin"])
+
+app.include_router(auditor_fees.router,
+prefix="/api/admin/auditor-fees", tags=["admin"])
+
+app.include_router(addon_services.router,
+prefix="/api/admin/addon-services", tags=["admin"])
+
+app.include_router(grc_tools.router, prefix="/api/admin/grc-tools",
+tags=["admin"])
+
+app.include_router(dpo_vciso.router, prefix="/api/admin/dpo-vciso",
+tags=["admin"])
+
+app.include_router(fx_rate.router, prefix="/api/admin/fx-rate",
+tags=["admin"])
+
+```
+
+### `backend/requirements.txt`
+
+```
+
+fastapi==0.111.0
+
+uvicorn[standard]==0.30.1
+
+sqlalchemy==2.0.30
+
+alembic==1.13.1
+
+pymysql==1.1.0
+
+cryptography==42.0.8
+
+python-jose[cryptography]==3.3.0
+
+passlib[bcrypt]==1.7.4
+
+python-multipart==0.0.9
+
+pydantic==2.7.1
+
+pydantic-settings==2.3.1
+
+weasyprint==62.3
+
+Pillow==10.3.0
+
+python-dotenv==1.0.1
+
+httpx==0.27.0
+
+shortuuid==1.0.13
+
+```
+
+### Auth flow
+
+**Login:** `POST /api/auth/login` — accepts `{email, password}`,
+verifies bcrypt hash, returns `{access_token, token_type, user}`. Set as
+HTTP-only cookie on the response.
+
+**Middleware dependency (use on every protected route):**
+
+```python
+
+# services/auth_service.py
+
+from fastapi import Depends, HTTPException, status
+
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from jose import JWTError, jwt
+
+security = HTTPBearer()
+
+def get_current_user(credentials: HTTPAuthorizationCredentials =
+Depends(security), db: Session = Depends(get_db)):
+
+token = credentials.credentials
+
+try:
+
+payload = jwt.decode(token, settings.SECRET_KEY,
+algorithms=[settings.ALGORITHM])
+
+user_id = payload.get("sub")
+
+if not user_id:
+
+raise HTTPException(status_code=401, detail="Invalid token")
+
+except JWTError:
+
+raise HTTPException(status_code=401, detail="Invalid token")
+
+user = db.query(User).filter(User.id == user_id, User.is_active ==
+True).first()
+
+if not user:
+
+raise HTTPException(status_code=401, detail="User not found")
+
+return user
+
+def require_roles(*roles):
+
+def dependency(current_user = Depends(get_current_user)):
+
+if current_user.role not in roles:
+
+raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+return current_user
+
+return dependency
+
+```
+
+**Usage on admin routes:**
+
+```python
+
+@router.get("/")
+
+def list_frameworks(
+
+db: Session = Depends(get_db),
+
+current_user = Depends(require_roles("super_admin"))
+
+):
+
+...
+
+```
+
+### Role enforcement on API routes
+
+| Route | Allowed Roles | Notes |
+
+|---|---|---|
+
+| `GET /api/pricing` | Any authenticated | — |
+
+| `GET/POST /api/clients` | sales_executive, sales_manager, super_admin
+| — |
+
+| `GET /api/quotes` | All authenticated | sales_executive sees own only
+|
+
+| `POST /api/quotes` | sales_executive, sales_manager, super_admin | — |
+
+| `POST /api/quotes/{id}/action` approve | sales_manager, super_admin |
+— |
+
+| `POST /api/quotes/{id}/action` finance_approve | finance, super_admin
+| — |
+
+| `GET /api/quotes/{id}/pdf` | All authenticated | Own quotes or above |
+
+| `GET /api/dashboard` | All authenticated | — |
+
+| `ALL /api/admin/*` | super_admin only | Pricing config |
+
+| `GET /api/users` | sales_manager, super_admin | sales_manager sees
+non-admin users only |
+
+| `POST /api/users` | sales_manager, super_admin | sales_manager: roles
+≤ sales_executive |
+
+| `PATCH /api/users/{id}` | sales_manager, super_admin | sales_manager:
+cannot edit admins or above |
+
+| `POST /api/users/{id}/reset-password` | sales_manager, super_admin |
+sales_manager: cannot reset admin passwords |
+
+| `PATCH /api/users/{id}/block` | sales_manager, super_admin |
+sales_manager: cannot block admins |
+
+| `DELETE /api/users/{id}` | sales_manager, super_admin | sales_manager:
+cannot delete admins; neither can delete themselves |
+
+---
+
+## 8. PRICING ENGINE (Python)
+
+Port the TypeScript `quoteCalculator.ts` logic exactly to Python in
+`backend/services/quote_calculator.py`.
+
+**Calculation order:**
+
+1. Consulting fee = `framework_price.project_fee_inr` for selected
+`(framework_id, tier_id)`
+
+2. If `include_retainer=True`, add `framework_price.retainer_fee_inr`
+
+3. Sum all selected `auditor_fee.fee_inr` values
+
+4. Sum all selected `addon_service.fee_inr` values
+
+5. Add `grc_tool.fee_inr_annual` if selected
+
+6. Add `dpo_vciso_package.fee_inr_monthly` or `fee_inr_annual` as
+selected
+
+7. **Internal time** (`internal_hours × internal_hourly_rate`) is
+tracked but **NEVER added to subtotal or billed total**
+
+8. `subtotal = sum of steps 1–6`
+
+9. `discount_inr = subtotal × (discount_pct / 100)` OR flat
+`discount_inr`
+
+10. `gst_amount = (subtotal - discount_inr) × (gst_rate / 100)`
+
+11. `total_inr = subtotal - discount_inr + gst_amount`
+
+12. `total_usd = total_inr / usd_inr_rate`
+
+**Save to `quote_line_items`** one row per component using `line_type`
+enum.
+
+---
+
+## 9. PDF GENERATION (Python — WeasyPrint)
+
+Generate the PDF in `backend/services/pdf_service.py` using WeasyPrint
+(HTML → PDF). This is cleaner than jsPDF and produces better print
+fidelity.
+
+### PDF layout requirements (professional A4)
+
+**Header (purple bar, full width):**
+
+- Teal accent stripe 3mm at very top
+
+- Orange rule 0.8mm below teal stripe
+
+- Purple background `#812671` for the rest of the header (44mm tall)
+
+- Logo left-aligned at `(20mm, 10mm)`, height 22mm, baseline-aligned
+with company name text
+
+- "iSecurify" bold 20pt white, on same row as logo
+
+- "GRC Compliance Proposal" 9pt light purple below company name
+
+- Quote ID badge (white rounded pill) on same row, right of the subtitle
+
+- Right side: Date, Valid Until, Version — 9pt white
+
+- Status badge (coloured pill) bottom-right of header
+
+**Body sections** — each section has:
+
+- Section title: 12pt bold in brand colour, with full-width underline
+rule
+
+- 8mm gap above each section title
+
+- 6mm gap between label/value rows within a section
+
+**Required sections in order:**
+
+1. Client Details (Company, Sector, Size, Country, Contact person)
+
+2. Framework & Tier (Framework name, Tier name, FX Rate snapshot)
+
+3. Line Items Table (columns: `#` centre | Description auto-width | Type
+35mm | Amount (INR) 35mm right-aligned with ₹ prefix)
+
+4. Summary (Subtotal, Discount if any, GST @ 18%, Grand Total
+highlighted row in purple)
+
+5. Grand Total in USD (muted, below the box)
+
+6. Retainer notice if applicable (orange pill)
+
+7. Payment Terms table (Advance 40% / Midway 40% / On Completion 20%)
+
+8. Approval & Authorization (Created By card, Approved By card — teal
+accent left border)
+
+9. Approval Timeline table (if any approvals exist)
+
+10. Internal Time note (grey box, italic, "Not Billed")
+
+11. Notes (if any)
+
+**Footer (every page):**
+
+- Teal bar 2.5mm at bottom
+
+- Divider line 15mm from bottom
+
+- Left: "Confidential — iSecurify GRC Pricing Platform"
+
+- Right: "Valid until {date} | Page X of Y"
+
+**WeasyPrint HTML template** — use Jinja2 for the HTML template with
+inline CSS. All monetary values use Indian lakh format (e.g.,
+₹2,50,000).
+
+---
+
+## 10. FRONTEND — React + Vite
+
+### Authentication
+
+Use Axios with a request interceptor that attaches the JWT from
+localStorage:
+
+```ts
+
+// src/lib/api.ts
+
+import axios from 'axios'
+
+import { useAuthStore } from '@/store/authStore'
+
+const api = axios.create({ baseURL: '/api' })
+
+api.interceptors.request.use(config => {
+
+const token = useAuthStore.getState().token
+
+if (token) config.headers.Authorization = `Bearer ${token}`
+
+return config
+
+})
+
+api.interceptors.response.use(
+
+res => res,
+
+err => {
+
+if (err.response?.status === 401) {
+
+useAuthStore.getState().logout()
+
+window.location.href = '/login'
+
+}
+
+return Promise.reject(err)
+
+}
+
+)
+
+export default api
+
+```
+
+### Auth Store (Zustand)
+
+```ts
+
+// src/store/authStore.ts
+
+interface AuthState {
+
+user: User | null
+
+token: string | null
+
+login: (user: User, token: string) => void
+
+logout: () => void
+
+}
+
+export const useAuthStore = create<AuthState>()(
+
+persist(
+
+(set) => ({
+
+user: null,
+
+token: null,
+
+login: (user, token) => set({ user, token }),
+
+logout: () => set({ user: null, token: null }),
+
+}),
+
+{ name: 'isecurify-auth' }
+
+)
+
+)
+
+```
+
+### Role-based UI rules
+
+In `Shell.tsx`:
+
+- Show **Admin Panel** nav item only if `user.role === 'super_admin'`
+
+- Show **User Management** nav item for both `super_admin` and
+`sales_manager`
+
+- Show logged-in user name + role badge at the bottom of the sidebar
+
+- Role badge colours: Super Admin → purple, Sales Manager → amber, Sales
+Executive → teal, Finance → blue
+
+In `QuotesViews.tsx`:
+
+- **Approve / Reject buttons**: show only for `sales_manager` and
+`super_admin`
+
+- **Finance Approve button**: show only for `finance` and `super_admin`
+
+- **Submit for Review**: show only for `sales_executive` and
+`sales_manager`
+
+- **Delete Quote**: show only for `super_admin`
+
+- Quote list: `sales_executive` sees only `created_by_id === user.id`
+
+In `UserManagementView.tsx`:
+
+- **Super Admin sees:** all users across all roles; can create any role
+including `sales_manager`
+
+- **Sales Manager sees:** only users with roles `sales_executive`,
+`finance`, `viewer`; Create User button is available but role dropdown
+is restricted to those three roles
+
+- **For every user row, show action buttons:**
+
+- ✅ **Reset Password** — opens a modal with a new password field (min 8
+chars, 1 uppercase, 1 digit); on submit, backend bcrypt-hashes and
+updates; show success toast "Password reset for {name}"
+
+- ✅ **Block / Unblock** — toggles `is_active`; blocked users cannot log
+in (API returns 403 "Account disabled"); button label changes to
+"Unblock" when user is blocked; row shows a red "Blocked" badge
+
+- ✅ **Delete** — opens a confirmation AlertDialog: "Are you sure you
+want to permanently delete {name}? This cannot be undone."; on confirm,
+hard-deletes the user row; if the user has quotes, set `created_by_id`
+to the current admin's id before deleting (reassign, don't
+cascade-delete quotes)
+
+- ❌ Do not show Block or Delete on the logged-in user's own row
+
+- ❌ Sales Manager: do not show any action buttons on rows where role is
+`sales_manager` or `super_admin`
+
+- **Create User modal fields:** Full Name, Email, Role (dropdown
+filtered by caller's permissions), Password, Confirm Password
+
+- Password reset and create flows must enforce: min 8 chars, at least 1
+uppercase letter, at least 1 digit
+
+### Login Page (`src/pages/LoginPage.tsx`)
+
+- iSecurify logo centred
+
+- "GRC Pricing Platform" subtitle
+
+- Email + Password fields
+
+- "Sign In" button (purple, full width)
+
+- Background: light slate `#F8FAFC` with subtle brand-coloured card
+
+- On success: store token + user in authStore, redirect to `/`
+
+### 6-Step Quote Builder
+
+Replicate the existing wizard exactly:
+
+| Step | Title | Content |
+
+|---|---|---|
+
+| 0 | Framework & Client | Client selector/creator, Framework picker
+(grouped by category), framework description |
+
+| 1 | Tier | Startup / Mid-size / Enterprise card selector, retainer
+toggle |
+
+| 2 | Auditor Fees | Checkbox list grouped by standard name (EGAC, UAF,
+Cert-In rows) |
+
+| 3 | Add-on Services | Checkbox cards for gap analysis, documentation,
+training, audit, advisory |
+
+| 4 | Tools & DPO/vCISO | GRC tool plan selector, DPO / vCISO / combined
+package selector |
+
+| 5 | Review & Submit | Live summary panel, internal hours input,
+discount (% or flat), notes, Save Draft / Submit |
+
+Live summary panel (sticky right column on desktop):
+
+- Shows running total updating as user selects items
+
+- Subtotal, GST, Grand Total in INR + USD equivalent
+
+- Retainer note if toggled
+
+---
+
+## 11. MASTER SEED DATA
+
+Seed this exact data via `backend/seed.py`:
+
+### Tenant
+
+- `id=tenant-isecurify`, `slug=isecurify`, `name=iSecurify`,
+`primary_color=#812671`, `secondary_color=#571A4D`,
+`domain=isecurify.in`, `plan=enterprise`
+
+### Users (bcrypt hash all passwords)
+
+| Name | Email | Password | Role |
+
+|---|---|---|---|
+
+| System Administrator | admin@isecurify.in | Admin@iSecurify2025! |
+super_admin |
+
+| Priya Sharma | sales.manager@isecurify.in | Sales@Manager2025! |
+sales_manager |
+
+| Rahul Verma | sales.exec@isecurify.in | Sales@Exec2025! |
+sales_executive |
+
+| Anita Desai | finance@isecurify.in | Finance@iSecurify2025! | finance
+|
+
+### 3 Tiers
+
+Startup (retainer 20%), Mid-size (retainer 18%), Enterprise (retainer
+15%)
+
+### 26 Frameworks (category → names)
+
+- **IT_Security:** ISO 27001, ISO 22301, ISO 42001, ISO 20000-1
+
+- **Privacy:** SOC 2 Type 2, HIPAA, GDPR, CCPA, DPDP (India), PCI-DSS,
+NIST
+
+- **Quality:** ISO 9001, ISO 14001, ISO 45001
+
+- **Food_Safety:** ISO 22000, HACCP, HALAL, KOSHER, BRC, ORGANIC, GMP
+
+- **Industry:** CMMI Level 3, CMMI Level 5, HITRUST, FCC, FEDRAMP
+
+### Framework Prices (INR) — project_fee × [Startup, Mid-size,
+Enterprise]
+
+```
+
+ISO 27001: 150000 / 400000 / 900000
+
+SOC 2 Type 2: 200000 / 500000 / 1200000
+
+HIPAA: 180000 / 450000 / 1000000
+
+GDPR: 120000 / 300000 / 700000
+
+CCPA: 100000 / 250000 / 600000
+
+DPDP (India): 100000 / 250000 / 600000
+
+PCI-DSS: 120000 / 350000 / 800000
+
+ISO 9001: 50000 / 150000 / 300000
+
+ISO 14001: 60000 / 180000 / 350000
+
+ISO 45001: 70000 / 200000 / 400000
+
+ISO 22000: 80000 / 250000 / 500000
+
+ISO 22301: 150000 / 400000 / 900000
+
+ISO 42001: 150000 / 400000 / 900000
+
+ISO 20000-1: 150000 / 400000 / 900000
+
+NIST: 150000 / 400000 / 900000
+
+CMMI Level 3: 300000 / 800000 / 2000000
+
+CMMI Level 5: 500000 / 1500000 / 3500000
+
+HACCP: 80000 / 200000 / 450000
+
+HALAL: 60000 / 150000 / 350000
+
+KOSHER: 60000 / 150000 / 350000
+
+BRC: 100000 / 250000 / 550000
+
+ORGANIC: 70000 / 180000 / 400000
+
+GMP: 70000 / 180000 / 400000
+
+HITRUST: 250000 / 600000 / 1400000
+
+FCC: 100000 / 250000 / 600000
+
+FEDRAMP: 400000 / 1000000 / 2500000
+
+```
+
+Retainer fee = `project_fee × tier.retainer_pct / 100`
+
+### Auditor Fees
+
+```
+
+ISO 9001 / EGAC: ₹2,500 | ISO 9001 / UAF: ₹3,500
+
+ISO 14001 / EGAC: ₹4,000 | ISO 14001 / UAF: ₹5,000
+
+ISO 45001 / EGAC: ₹5,000 | ISO 45001 / UAF: ₹6,500
+
+ISO 22000 / EGAC: ₹7,000 | ISO 22000 / UAF: ₹8,500
+
+ISO 27001 / EGAC: ₹12,500 | ISO 27001 / UAF: ₹17,000
+
+ISO 22301 / EGAC: ₹15,000 | ISO 22301 / UAF: ₹18,000
+
+ISO 20000-1 / EGAC: ₹15,000 | ISO 20000-1 / UAF: ₹18,000
+
+HIPAA / Compliance: ₹15,000
+
+GDPR/CCPA / Compliance: ₹15,000
+
+DPDP (India) / Compliance: ₹10,000
+
+ISO 42001 / Compliance: ₹15,000
+
+SOC 2 Type 2 / Compliance: ₹1,25,000
+
+CMMI Level 3 / EGAC: ₹10,00,000 | CMMI Level 3 / Compliance: ₹7,500
+
+CMMI Level 5 / EGAC: ₹27,50,000 | CMMI Level 5 / Compliance: ₹10,000
+
+VAPT / Cert-In: ₹5,000 (Basic) / ₹12,000 (Standard) / ₹25,000
+(Comprehensive)
+
+```
+
+### Add-on Services
+
+```
+
+Gap Analysis Report: ₹25,000 (gap_analysis)
+
+Risk Assessment & Control Map: ₹20,000 (advisory)
+
+Policy & Documentation Pack: ₹30,000 (documentation)
+
+Internal Audit Training (1 day): ₹15,000 (training)
+
+Audit Attendance (per day): ₹10,000 (audit)
+
+Readiness Assessment Report: ₹15,000 (advisory)
+
+Employee Awareness Training: ₹12,000 (training)
+
+Third-Party Vendor Assessment: ₹20,000 (advisory)
+
+```
+
+### DPO / vCISO Packages
+
+```
+
+DPO Basic: 8h/mo ₹15,000/mo ₹1,62,000/yr
+
+DPO Standard: 16h/mo ₹25,000/mo ₹2,70,000/yr
+
+DPO Comprehensive: 32h/mo ₹45,000/mo ₹4,86,000/yr
+
+vCISO Basic: 8h/mo ₹20,000/mo ₹2,16,000/yr
+
+vCISO Standard: 16h/mo ₹35,000/mo ₹3,78,000/yr
+
+vCISO Comprehensive: 32h/mo ₹60,000/mo ₹6,48,000/yr
+
+DPO+vCISO Combined: 40h/mo ₹75,000/mo ₹8,10,000/yr
+
+```
+
+### GRC Tools
+
+```
+
+Basic Plan: ₹50,000/yr (up to 10 users)
+
+Standard Plan: ₹1,20,000/yr (up to 50 users)
+
+Enterprise Plan: ₹2,50,000/yr (unlimited)
+
+```
+
+### FX Rate
+
+USD/INR = 83.00
+
+### Sample Clients (8)
+
+Acme Technologies (IT, Startup), BlueWave Fintech (Finance, Mid-size),
+Nimbus Healthcare (Healthcare, Enterprise), Verdant Foods (Food,
+Mid-size), Quantum Logistics (Supply Chain, Enterprise), Stellar
+Innovations (SaaS, Startup), Orchid Manufacturing (Manufacturing,
+Mid-size), Pinnacle Retail Group (Retail, Enterprise)
+
+---
+
+## 12. WEB SERVER CONFIGURATION
+
+### Option A — Nginx (RECOMMENDED)
+
+Install: `sudo apt install nginx`
+
+**`/etc/nginx/sites-available/isecurify`**
+
+```nginx
+
+server {
+
+listen 80;
+
+server_name YOUR_DOMAIN_OR_IP;
+
+# Frontend — React build (served as static files)
+
+root /var/www/isecurify/frontend/dist;
+
+index index.html;
+
+# All frontend routes → index.html (React Router SPA)
+
+location / {
+
+try_files $uri $uri/ /index.html;
+
+}
+
+# API → FastAPI (Uvicorn on port 8000)
+
+location /api/ {
+
+proxy_pass http://127.0.0.1:8000;
+
+proxy_http_version 1.1;
+
+proxy_set_header Host $host;
+
+proxy_set_header X-Real-IP $remote_addr;
+
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+proxy_set_header X-Forwarded-Proto $scheme;
+
+proxy_read_timeout 120s;
+
+proxy_connect_timeout 10s;
+
+}
+
+# Static uploads
+
+location /uploads/ {
+
+alias /var/www/isecurify/uploads/;
+
+expires 7d;
+
+add_header Cache-Control "public";
+
+}
+
+# Security headers
+
+add_header X-Frame-Options "SAMEORIGIN";
+
+add_header X-Content-Type-Options "nosniff";
+
+add_header X-XSS-Protection "1; mode=block";
+
+add_header Referrer-Policy "strict-origin-when-cross-origin";
+
+# Gzip
+
+gzip on;
+
+gzip_types text/plain application/json application/javascript text/css;
+
+client_max_body_size 20M;
+
+}
+
+```
+
+Enable: `sudo ln -s /etc/nginx/sites-available/isecurify
+/etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload
+nginx`
+
+### Option B — Apache2 (Alternative)
+
+Install: `sudo apt install apache2 && sudo a2enmod proxy proxy_http
+rewrite headers`
+
+**`/etc/apache2/sites-available/isecurify.conf`**
+
+```apache
+
+<VirtualHost *:80>
+
+ServerName YOUR_DOMAIN_OR_IP
+
+DocumentRoot /var/www/isecurify/frontend/dist
+
+# React SPA fallback
+
+<Directory /var/www/isecurify/frontend/dist>
+
+Options -Indexes +FollowSymLinks
+
+AllowOverride All
+
+Require all granted
+
+FallbackResource /index.html
+
+</Directory>
+
+# API proxy → FastAPI
+
+ProxyPreserveHost On
+
+ProxyPass /api/ http://127.0.0.1:8000/api/
+
+ProxyPassReverse /api/ http://127.0.0.1:8000/api/
+
+# Uploads
+
+Alias /uploads/ /var/www/isecurify/uploads/
+
+<Directory /var/www/isecurify/uploads/>
+
+Require all granted
+
+</Directory>
+
+# Security headers
+
+Header always set X-Frame-Options "SAMEORIGIN"
+
+Header always set X-Content-Type-Options "nosniff"
+
+ErrorLog /var/log/apache2/isecurify-error.log
+
+CustomLog /var/log/apache2/isecurify-access.log combined
+
+</VirtualHost>
+
+```
+
+Enable: `sudo a2ensite isecurify && sudo systemctl reload apache2`
+
+---
+
+## 13. UBUNTU SERVER SETUP — STEP BY STEP
+
+```bash
+
+# 1. Update system
+
+sudo apt update && sudo apt upgrade -y
+
+# 2. Install Python + pip + venv
+
+sudo apt install python3.11 python3.11-venv python3-pip -y
+
+# 3. Install MySQL 8.0
+
+sudo apt install mysql-server -y
+
+sudo mysql_secure_installation
+
+# Create database and user
+
+sudo mysql -u root -p <<EOF
+
+CREATE DATABASE isecurify CHARACTER SET utf8mb4 COLLATE
+utf8mb4_unicode_ci;
+
+CREATE USER 'isecurify_user'@'localhost' IDENTIFIED BY
+'CHANGE_THIS_STRONG_PASSWORD';
+
+GRANT ALL PRIVILEGES ON isecurify.* TO 'isecurify_user'@'localhost';
+
+FLUSH PRIVILEGES;
+
+EOF
+
+# 4. Install Node.js (for frontend build)
+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+
+sudo apt install nodejs -y
+
+# 5. WeasyPrint dependencies
+
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0 \
+
+libgdk-pixbuf2.0-0 libffi-dev libcairo2 libpango1.0-dev -y
+
+# 6. Create app directory
+
+sudo mkdir -p /var/www/isecurify/{backend,frontend,uploads}
+
+sudo chown -R $USER:$USER /var/www/isecurify
+
+# 7. Backend setup
+
+cd /var/www/isecurify/backend
+
+python3.11 -m venv venv
+
+source venv/bin/activate
+
+pip install -r requirements.txt
+
+# 8. Run Alembic migrations
+
+alembic upgrade head
+
+# 9. Seed master data
+
+python seed.py
+
+# 10. Frontend build
+
+cd /var/www/isecurify/frontend
+
+npm install
+
+npm run build
+
+# Output goes to /var/www/isecurify/frontend/dist
+
+# 11. Copy static files to web root (Nginx/Apache serve from dist/)
+
+# Already in place — just make sure Nginx/Apache root points to dist/
+
+```
+
+### systemd Service for FastAPI
+
+**`/etc/systemd/system/isecurify.service`**
+
+```ini
+
+[Unit]
+
+Description=iSecurify FastAPI Backend
+
+After=network.target mysql.service
+
+[Service]
+
+Type=exec
+
+User=www-data
+
+Group=www-data
+
+WorkingDirectory=/var/www/isecurify/backend
+
+EnvironmentFile=/var/www/isecurify/.env
+
+ExecStart=/var/www/isecurify/backend/venv/bin/uvicorn main:app --host
+127.0.0.1 --port 8000 --workers 2
+
+Restart=always
+
+RestartSec=5
+
+StandardOutput=journal
+
+StandardError=journal
+
+[Install]
+
+WantedBy=multi-user.target
+
+```
+
+```bash
+
+sudo systemctl daemon-reload
+
+sudo systemctl enable isecurify
+
+sudo systemctl start isecurify
+
+sudo systemctl status isecurify
+
+```
+
+---
+
+## 14. DESIGN SYSTEM
+
+| Token | Value | Usage |
+
+|---|---|---|
+
+| Primary purple | `#812671` | Buttons, headers, active nav, section
+titles |
+
+| Purple dark | `#571A4D` | Hover states |
+
+| Purple light | `#F0C8E6` | Highlight rows, tinted backgrounds |
+
+| Teal | `#1B887D` | Secondary sections, success states, teal sections |
+
+| Teal light | `#D5F1F0` | Card backgrounds, alternating table rows |
+
+| Orange | `#C46C1D` | Accents, warnings, retainer notices |
+
+| Orange light | `#FFE8D2` | Warning backgrounds |
+
+| Text dark | `#2B2A29` | Body text |
+
+| Text muted | `#64748B` | Labels, secondary text |
+
+| Background | `#F8FAFC` | Page background |
+
+| Border | `#CBD5E1` | Dividers, card borders |
+
+**Role badge colours:**
+
+- Super Admin → `bg-purple-100 text-purple-800 ring-1 ring-purple-300`
+
+- Sales Manager (Admin) → `bg-amber-100 text-amber-800 ring-1
+ring-amber-300`
+
+- Sales Executive (User) → `bg-teal-100 text-teal-800 ring-1
+ring-teal-300`
+
+- Finance → `bg-blue-100 text-blue-800 ring-1 ring-blue-300`
+
+**Currency formatting — Indian lakh system:**
+
+- `₹1,00,000` (one lakh) not `₹100,000`
+
+- `₹10,00,000` (ten lakhs) not `₹1,000,000`
+
+- Always prefix with ₹ symbol
+
+---
+
+## 15. WHAT TO BUILD — PRIORITISED CHECKLIST
+
+### Phase 1 — Foundation (build first)
+
+- [ ] MySQL database + Alembic migration for all 14 tables
+
+- [ ] FastAPI app skeleton with CORS, health check endpoint
+
+- [ ] SQLAlchemy ORM models for all tables
+
+- [ ] Pydantic schemas for all request/response types
+
+- [ ] Auth: login, JWT, `get_current_user`, `require_roles` dependency
+
+- [ ] Seed script with all master data + 4 demo users (bcrypt passwords)
+
+- [ ] `GET /api/pricing` — returns all pricing data in one call
+
+- [ ] React + Vite project setup with Tailwind + shadcn/ui
+
+- [ ] Login page with auth store
+
+- [ ] Protected route wrapper
+
+- [ ] Sidebar with role-based nav items + user info
+
+### Phase 2 — Core Workflows
+
+- [ ] Clients CRUD API + ClientsView (list, add, edit, deal stage)
+
+- [ ] Quote Builder wizard (all 6 steps) with live pricing panel
+
+- [ ] `POST /api/quotes` — save draft with line items
+
+- [ ] `GET /api/quotes` — list (filtered by role: own vs all)
+
+- [ ] `GET /api/quotes/{id}` — quote detail
+
+- [ ] `POST /api/quotes/{id}/action` — state machine (submit, approve,
+reject, finance_approve, send)
+
+- [ ] Quote detail view with approval buttons (role-gated)
+
+- [ ] Dashboard metrics API + DashboardView with charts
+
+### Phase 3 — PDF & Admin
+
+- [ ] WeasyPrint PDF service with all alignment requirements from
+Section 9
+
+- [ ] `GET /api/quotes/{id}/pdf` → stream A4 PDF
+
+- [ ] Admin Panel — full CRUD for all 8 pricing config sections
+(super_admin only)
+
+- [ ] `GET /api/users` — list users (super_admin: all; sales_manager:
+non-admin only)
+
+- [ ] `POST /api/users` — create user (role scope enforced per caller's
+role)
+
+- [ ] `PATCH /api/users/{id}` — edit name, email, role (scope enforced)
+
+- [ ] `POST /api/users/{id}/reset-password` — bcrypt new password, save
+
+- [ ] `PATCH /api/users/{id}/block` — toggle `is_active` true/false
+
+- [ ] `DELETE /api/users/{id}` — hard delete; reassign quotes to caller
+first; block self-delete
+
+- [ ] UserManagementView — table with role badge, status badge, action
+buttons (Reset Password, Block/Unblock, Delete); Create User modal; role
+dropdown filtered by caller's permissions
+
+### Phase 4 — Polish
+
+- [ ] Audit log writes on every mutating API call
+
+- [ ] FX rate live display in sidebar
+
+- [ ] Mobile-responsive nav
+
+- [ ] Quote PDF download button in QuotesViews
+
+- [ ] SSL with Let's Encrypt: `sudo certbot --nginx -d YOUR_DOMAIN`
+
+---
+
+## 16. KNOWN ISSUES TO AVOID
+
+1. **Do not mix Indian lakh format with Western comma format** — pick
+lakh everywhere (₹10,00,000 not ₹1,000,000).
+
+2. **Never add internal_time line items to the billed subtotal** — they
+are tracked for internal cost reporting only.
+
+3. **Tenant-specific framework prices override global prices** — always
+try `tenant_id = TENANT_ID` first, fall back to `tenant_id IS NULL`.
+
+4. **Quote state machine is one-directional** — `APPROVED` cannot go
+back to `DRAFT`. The only exception is `recalled` action by the creator.
+
+5. **PDF amounts must use Indian lakh format** — same as UI.
+
+6. **Finance role can only approve at `PENDING_FINANCE` stage** — not at
+`PENDING_REVIEW`.
+
+7. **User deletion requires quote reassignment** — before hard-deleting
+a user, reassign all their `quotes.created_by_id` to the deleting
+admin's `id`. Never cascade-delete quotes when a user is removed. Show a
+warning in the confirmation modal if the user has open quotes.
+
+8. **Password minimum requirements** — at least 8 chars, one uppercase,
+one digit. Enforce in both the Pydantic schema (backend) and with a
+real-time strength indicator in the UI (frontend).
+
+9. **Sales Manager cannot elevate privileges** — the `POST /api/users`
+and `PATCH /api/users/{id}` endpoints must server-side validate that a
+`sales_manager` caller cannot set `role` to `sales_manager` or
+`super_admin`. Reject with `403` if attempted.

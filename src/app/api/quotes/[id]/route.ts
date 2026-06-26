@@ -1,0 +1,149 @@
+/**
+ * /api/quotes/[id]
+ * GET    — fetch a single quote with line items & approvals
+ * PUT    — update a quote (re-compute if selection changed)
+ * DELETE — permanently delete a quote and its line items
+ */
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { TENANT_ID, computeQuote } from '@/lib/server/pricingEngine'
+
+export const dynamic = 'force-dynamic'
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params
+    const quote = await db.quote.findUnique({
+      where: { id, tenantId: TENANT_ID },
+      include: {
+        client: true,
+        framework: true,
+        tier: true,
+        createdBy: { select: { name: true, email: true } },
+        lineItems: { orderBy: { sortOrder: 'asc' } },
+        approvals: {
+          orderBy: { createdAt: 'asc' },
+          include: { actor: { select: { name: true, email: true } } },
+        },
+      },
+    })
+
+    if (!quote) {
+      return NextResponse.json({ error: 'Quote not found' }, { status: 404 })
+    }
+
+    return NextResponse.json({ data: quote })
+  } catch (err) {
+    console.error('[GET /api/quotes/[id]] error:', err)
+    return NextResponse.json({ error: 'Failed to fetch quote' }, { status: 500 })
+  }
+}
+
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params
+    const existing = await db.quote.findUnique({ where: { id, tenantId: TENANT_ID } })
+    if (!existing) {
+      return NextResponse.json({ error: 'Quote not found' }, { status: 404 })
+    }
+
+    const body = await req.json()
+    const { selection } = body as {
+      selection?: {
+        clientId: string
+        frameworkId: string
+        tierId: string
+        includeRetainer: boolean
+        selectedAuditorFeeIds: string[]
+        selectedAddonIds: string[]
+        grcToolEnabled: boolean
+        grcToolId: string | null
+        grcToolCustomFee: number | null
+        dpoVcisoPackageId: string | null
+        internalHours: number
+        internalHourlyRate: number
+        discountPct: number
+        discountReason: string
+        validUntilDays: number
+        notes: string
+      }
+    }
+
+    if (!selection) {
+      return NextResponse.json({ error: 'Selection is required' }, { status: 400 })
+    }
+
+    const computed = await computeQuote(selection)
+
+    const updated = await db.quote.update({
+      where: { id },
+      data: {
+        clientId: selection.clientId,
+        frameworkId: selection.frameworkId,
+        tierId: selection.tierId,
+        subtotalInr: computed.subtotalInr,
+        discountInr: computed.discountInr,
+        discountPct: selection.discountPct || 0,
+        discountReason: selection.discountReason || null,
+        gstAmountInr: computed.gstAmountInr,
+        totalInr: computed.totalInr,
+        totalUsd: computed.totalUsd,
+        usdInrRateSnapshot: computed.usdInrRate,
+        gstRateSnapshot: computed.gstRate,
+        includeRetainer: selection.includeRetainer,
+        retainerAmountInr: computed.retainerAmountInr,
+        internalHours: selection.internalHours || 0,
+        internalHourlyRate: selection.internalHourlyRate || 0,
+        notes: selection.notes || null,
+        // Delete old line items — they'll be rebuilt
+        lineItems: { deleteMany: {} },
+      },
+      include: {
+        client: true,
+        framework: true,
+        tier: true,
+        lineItems: { orderBy: { sortOrder: 'asc' } },
+        approvals: {
+          orderBy: { createdAt: 'asc' },
+          include: { actor: { select: { name: true, email: true } } },
+        },
+      },
+    })
+
+    return NextResponse.json({ data: updated })
+  } catch (err) {
+    console.error('[PUT /api/quotes/[id]] error:', err)
+    return NextResponse.json({ error: 'Failed to update quote' }, { status: 500 })
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params
+    const existing = await db.quote.findUnique({ where: { id, tenantId: TENANT_ID } })
+    if (!existing) {
+      return NextResponse.json({ error: 'Quote not found' }, { status: 404 })
+    }
+
+    // Delete related records first, then the quote
+    await db.quoteApproval.deleteMany({ where: { quoteId: id } })
+    await db.quoteLineItem.deleteMany({ where: { quoteId: id } })
+    await db.sowDocument.deleteMany({ where: { quoteId: id } })
+    await db.clientPortalToken.deleteMany({ where: { quoteId: id } })
+    await db.quote.delete({ where: { id } })
+
+    return NextResponse.json({ data: { success: true } })
+  } catch (err) {
+    console.error('[DELETE /api/quotes/[id]] error:', err)
+    return NextResponse.json({ error: 'Failed to delete quote' }, { status: 500 })
+  }
+}
