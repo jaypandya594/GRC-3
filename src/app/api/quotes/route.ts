@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     const { selection, submit } = body as {
       selection: {
         clientId: string
-        frameworkId: string
+        selectedFrameworkIds: string[]
         tierId: string
         includeRetainer: boolean
         selectedAuditorFeeIds: string[]
@@ -67,9 +67,13 @@ export async function POST(req: NextRequest) {
       submit: boolean
     }
 
-    if (!selection?.clientId || !selection?.frameworkId || !selection?.tierId) {
-      return NextResponse.json({ error: 'Client, framework, and tier are required' }, { status: 400 })
+    const fwIds = selection.selectedFrameworkIds || []
+    if (!selection?.clientId || fwIds.length === 0 || !selection?.tierId) {
+      return NextResponse.json({ error: 'Client, at least one framework, and tier are required' }, { status: 400 })
     }
+
+    // Use first framework as the primary on the Quote record
+    const primaryFrameworkId = fwIds[0]
 
     // Compute quote using server-side engine
     const computed = await computeQuote(selection)
@@ -84,7 +88,7 @@ export async function POST(req: NextRequest) {
       data: {
         tenantId: TENANT_ID,
         clientId: selection.clientId,
-        frameworkId: selection.frameworkId,
+        frameworkId: primaryFrameworkId,
         tierId: selection.tierId,
         version: 1,
         status: initialStatus,
@@ -138,7 +142,7 @@ export async function POST(req: NextRequest) {
 
 async function buildLineItems(
   selection: {
-    frameworkId: string
+    selectedFrameworkIds: string[]
     tierId: string
     includeRetainer: boolean
     selectedAuditorFeeIds: string[]
@@ -163,34 +167,37 @@ async function buildLineItems(
   }> = []
   let sortOrder = 0
 
-  // Consulting fee
-  const price = await db.frameworkPrice.findFirst({
-    where: {
-      frameworkId: selection.frameworkId,
-      tierId: selection.tierId,
-      OR: [{ tenantId: null }, { tenantId: TENANT_ID }],
-    },
-  })
-  const framework = await db.framework.findUnique({ where: { id: selection.frameworkId } })
-  const tier = await db.tier.findUnique({ where: { id: selection.tierId } })
-
-  if (price && framework && tier) {
-    lines.push({
-      lineType: 'consulting_fee',
-      description: `${framework.name} — Consulting Fee (${tier.name})`,
-      referenceId: framework.id,
-      amountInr: price.projectFeeInr,
-      sortOrder: sortOrder++,
+  // Consulting fees — one per selected framework
+  const fwIds = selection.selectedFrameworkIds || []
+  for (const fwId of fwIds) {
+    const price = await db.frameworkPrice.findFirst({
+      where: {
+        frameworkId: fwId,
+        tierId: selection.tierId,
+        OR: [{ tenantId: null }, { tenantId: TENANT_ID }],
+      },
     })
+    const framework = await db.framework.findUnique({ where: { id: fwId } })
+    const tier = await db.tier.findUnique({ where: { id: selection.tierId } })
 
-    if (selection.includeRetainer && price.retainerFeeInr > 0) {
+    if (price && framework && tier) {
       lines.push({
-        lineType: 'retainer',
-        description: `Annual Retainer (${tier.retainerPct}% of project fee)`,
-        referenceId: tier.id,
-        amountInr: price.retainerFeeInr,
+        lineType: 'consulting_fee',
+        description: `${framework.name} — Consulting Fee (${tier.name})`,
+        referenceId: framework.id,
+        amountInr: price.projectFeeInr,
         sortOrder: sortOrder++,
       })
+
+      if (selection.includeRetainer && price.retainerFeeInr > 0) {
+        lines.push({
+          lineType: 'retainer',
+          description: `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
+          referenceId: tier.id,
+          amountInr: price.retainerFeeInr,
+          sortOrder: sortOrder++,
+        })
+      }
     }
   }
 

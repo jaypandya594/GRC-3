@@ -132,4 +132,33 @@ Work Log:
 Stage Summary:
 - Admins (super_admin and sales_manager) can now edit user names via a pencil icon button
 - Validation ensures name is not empty and has at least 2 characters
-- Consistent styling with existing dialogs and actions
+- Consistent styling with existing dialogs and actions---
+Task ID: 5
+Agent: Main Orchestrator
+Task: Fix PDF alignment, logo visibility, and multi-framework display
+
+Work Log:
+- Completely rewrote /api/quote-pdf/[id]/route.ts with improved PDF layout:
+  - Added solid white opaque rounded-rect background behind logo for contrast against purple header
+  - Restructured header with clear coordinate system (teal stripe → orange line → purple band)
+  - Fixed all element positioning to prevent overlaps
+  - Added proper cellPadding to all autoTable calls for better text alignment
+  - Used column width constraints for cleaner table layouts
+  - Added page-break safety checks before every major section
+  - Renamed "Line Items" to "Pricing Breakdown" for clarity
+  - Improved Compliance Services section to show all frameworks from consulting_fee lines as bulleted list
+  - Placed Tier and FX Rate on the same row for space efficiency
+  - Added proper grand total highlight box with border
+- Updated QuoteDetailView in QuotesViews.tsx:
+  - Added getAllFrameworkNames() helper that extracts all framework names from consulting_fee line items
+  - Added buildQuoteSubtitle() helper for the TopBar
+  - Updated subtitle to show all frameworks (e.g., "ISO 27001, ISO 9001 • Mid-size • v1")
+  - Updated Meta label from "Framework" to "Framework(s)"
+- Updated QuotesListView to show all frameworks in the table column using getFrameworkNamesFromLines() helper
+- Verified PDF generation produces valid 1.7MB PDF with embedded logo
+- Verified quote detail shows "ISO 2701, ISO 9001" correctly in subtitle, meta, and line items
+
+Stage Summary:
+- PDF logo now has white opaque background pill for clear visibility against purple header
+- PDF alignment fixed with proper spacing, padding, and coordinate calculations
+- Multi-framework display works end-to-end: Quote Builder → Quote Detail → PDF → Quote List

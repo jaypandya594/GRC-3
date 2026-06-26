@@ -16,6 +16,7 @@ interface QuoteBuilderState {
   nextStep: () => void
   prevStep: () => void
   update: (patch: Partial<QuoteBuilderSelection>) => void
+  toggleFramework: (id: string) => void
   toggleAuditorFee: (id: string) => void
   toggleAddon: (id: string) => void
   reset: () => void
@@ -32,6 +33,19 @@ export const useQuoteBuilderStore = create<QuoteBuilderState>()(
       prevStep: () => set((s) => ({ currentStep: Math.max(0, s.currentStep - 1) })),
       update: (patch) =>
         set((s) => ({ selection: { ...s.selection, ...patch } })),
+      toggleFramework: (id) =>
+        set((s) => {
+          const ids = s.selection.selectedFrameworkIds
+          const exists = ids.includes(id)
+          return {
+            selection: {
+              ...s.selection,
+              selectedFrameworkIds: exists
+                ? ids.filter((x) => x !== id)
+                : [...ids, id],
+            },
+          }
+        }),
       toggleAuditorFee: (id) =>
         set((s) => {
           const ids = s.selection.selectedAuditorFeeIds

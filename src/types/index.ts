@@ -253,7 +253,7 @@ export interface Quote {
 // ── Quote builder state (Zustand) ─────────────────────────────
 export interface QuoteBuilderSelection {
   clientId: string | null
-  frameworkId: string | null
+  selectedFrameworkIds: string[]
   tierId: string | null
   includeRetainer: boolean
   selectedAuditorFeeIds: string[]

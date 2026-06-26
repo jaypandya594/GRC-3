@@ -9,20 +9,20 @@ import { formatDate, formatINR, formatUSD } from '@/lib/currency'
 export const dynamic = 'force-dynamic'
 
 // ── Brand Colors (RGB) ──
-const BRAND = {
-  purple: [129, 38, 113] as const,      // #812671 — primary
-  purpleDark: [87, 26, 77] as const,     // #571A4D
-  purpleLight: [240, 200, 230] as const,  // #F0C8E6
-  teal: [27, 136, 125] as const,         // #1B887D — secondary
-  tealLight: [213, 241, 240] as const,   // #D5F1F0
-  orange: [196, 108, 29] as const,       // #C46C1D — accent
-  orangeLight: [255, 232, 210] as const,  // #FFE8D2
-  blue: [20, 111, 158] as const,         // #146F9E
-  dark: [43, 42, 41] as const,           // #2B2A29 — text
-  muted: [100, 116, 139] as const,       // #64748B
-  lightGray: [248, 250, 252] as const,   // #F8FAFC
+const B = {
+  purple: [129, 38, 113] as const,
+  purpleDark: [87, 26, 77] as const,
+  purpleLight: [240, 200, 230] as const,
+  teal: [27, 136, 125] as const,
+  tealLight: [213, 241, 240] as const,
+  orange: [196, 108, 29] as const,
+  orangeLight: [255, 232, 210] as const,
+  blue: [20, 111, 158] as const,
+  dark: [43, 42, 41] as const,
+  muted: [100, 116, 139] as const,
+  lightGray: [248, 250, 252] as const,
   white: [255, 255, 255] as const,
-  border: [203, 213, 225] as const,      // #CBD5E1
+  border: [203, 213, 225] as const,
 }
 
 export async function GET(
@@ -56,137 +56,188 @@ export async function GET(
     const { default: autoTable } = await import('jspdf-autotable')
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const pageW = doc.internal.pageSize.getWidth()
-    const pageH = doc.internal.pageSize.getHeight()
-    const m = 20 // margin
-    const colW = pageW - m * 2
+    const pageW = doc.internal.pageSize.getWidth()   // 210
+    const pageH = doc.internal.pageSize.getHeight()   // 297
+    const mL = 20  // left margin
+    const mR = 20  // right margin
+    const contentW = pageW - mL - mR  // 170
+    let y = 0
 
-    // ══════════════════════════════════════════════
-    // HEADER — Branded gradient-style header
-    // ══════════════════════════════════════════════
-    // Main purple header bar
-    doc.setFillColor(...BRAND.purple)
-    doc.rect(0, 0, pageW, 44, 'F')
+    // ══════════════════════════════════════════════════════════
+    // HEADER
+    // ══════════════════════════════════════════════════════════
 
-    // Teal accent stripe at top
-    doc.setFillColor(...BRAND.teal)
-    doc.rect(0, 0, pageW, 3, 'F')
+    // Full-width teal accent stripe at very top
+    doc.setFillColor(...B.teal)
+    doc.rect(0, 0, pageW, 3.5, 'F')
 
-    // Orange accent line
-    doc.setFillColor(...BRAND.orange)
-    doc.rect(0, 3, pageW, 0.8, 'F')
+    // Thin orange line
+    doc.setFillColor(...B.orange)
+    doc.rect(0, 3.5, pageW, 1, 'F')
 
-    // Try to add logo
-    let logoAdded = false
+    // Purple header band (from y=4.5 to y=48)
+    const headerTop = 4.5
+    const headerH = 44
+    doc.setFillColor(...B.purple)
+    doc.rect(0, headerTop, pageW, headerH, 'F')
+
+    // ── Logo: white rounded rectangle + icon ──
+    const logoSize = 22
+    const logoX = mL
+    const logoY = headerTop + 12
+    const pillPad = 3
+    const pillSize = logoSize + pillPad * 2
+
+    // Solid white opaque pill background for contrast
+    doc.setFillColor(...B.white)
+    doc.roundedRect(logoX, logoY - pillPad, pillSize, pillSize, 3, 3, 'F')
+
+    // Add the icon logo on the white pill
+    let hasLogo = false
     try {
       const fs = await import('fs')
       const path = await import('path')
-      const logoPath = path.join(process.cwd(), 'public', 'logo-small.png')
+      const logoPath = path.join(process.cwd(), 'public', 'logo-full.png')
       if (fs.existsSync(logoPath)) {
         const logoData = fs.readFileSync(logoPath)
         const logoB64 = logoData.toString('base64')
-        doc.addImage(logoB64, 'PNG', m, 10, 40, 18.3)
-        logoAdded = true
+        doc.addImage(logoB64, 'PNG', logoX + pillPad, logoY, logoSize, logoSize)
+        hasLogo = true
       }
-    } catch { /* fallback to text */ }
+    } catch { /* fallback to text logo */ }
 
-    // Wide logo already includes "iSecurify" text, so just add subtitle
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'normal')
-    doc.setTextColor(210, 180, 200) // light purple
-    doc.text('GRC Compliance Proposal', logoAdded ? m + 45 : m, 24)
+    // ── Company name & subtitle ──
+    const textStartX = hasLogo ? logoX + pillSize + 5 : mL + 2
 
-    // Quote ID badge
-    doc.setFillColor(255, 255, 255)
-    doc.setDrawColor(255, 255, 255)
-    doc.roundedRect(logoAdded ? m + 45 : m, 31, 60, 7, 1, 1, 'F')
-    doc.setTextColor(...BRAND.purple)
-    doc.setFontSize(8)
+    doc.setTextColor(...B.white)
+    doc.setFontSize(20)
     doc.setFont('helvetica', 'bold')
-    doc.text(`QUOTE  ${id.slice(-8).toUpperCase()}`, (logoAdded ? m + 45 : m) + 4, 35.5)
+    doc.text('iSecurify', textStartX, logoY + 5)
 
-    // Right side — meta info
-    doc.setTextColor(...BRAND.white)
     doc.setFontSize(9)
     doc.setFont('helvetica', 'normal')
-    doc.text(`Date: ${formatDate(quote.createdAt)}`, pageW - m, 14, { align: 'right' })
-    doc.text(`Valid Until: ${formatDate(quote.validUntil)}`, pageW - m, 20, { align: 'right' })
-    doc.text(`Version: ${quote.version}`, pageW - m, 26, { align: 'right' })
+    doc.setTextColor(220, 195, 215)
+    doc.text('GRC Compliance Proposal', textStartX, logoY + 11)
 
-    // Status badge on right
+    // Quote ID badge (white pill with purple text)
+    const badgeW = 58
+    const badgeH = 7
+    const badgeY = logoY + 15
+    doc.setFillColor(...B.white)
+    doc.roundedRect(textStartX, badgeY, badgeW, badgeH, 1.5, 1.5, 'F')
+    doc.setTextColor(...B.purple)
+    doc.setFontSize(7.5)
+    doc.setFont('helvetica', 'bold')
+    doc.text(`QUOTE  ${id.slice(-8).toUpperCase()}`, textStartX + 4, badgeY + 5)
+
+    // ── Right side: date, valid until, version ──
+    const rX = pageW - mR
+    doc.setTextColor(...B.white)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Date: ${formatDate(quote.createdAt)}`, rX, headerTop + 14, { align: 'right' })
+    doc.text(`Valid Until: ${formatDate(quote.validUntil)}`, rX, headerTop + 21, { align: 'right' })
+    doc.text(`Version: ${quote.version}`, rX, headerTop + 28, { align: 'right' })
+
+    // Status badge
     const statusText = (quote.status as string).replace(/_/g, ' ').toUpperCase()
-    const statusColor = quote.status === 'APPROVED' ? BRAND.teal
+    const statusColor = quote.status === 'APPROVED' ? B.teal
       : quote.status === 'REJECTED' ? [220, 38, 38] as const
-      : quote.status === 'SENT' ? BRAND.blue
-      : BRAND.orange
+      : quote.status === 'SENT' ? B.blue
+      : B.orange
+    const sBadgeW = 40
+    const sBadgeH = 8
+    const sBadgeY = headerTop + 33
     doc.setFillColor(...statusColor)
-    doc.roundedRect(pageW - m - 40, 30, 40, 8, 1.5, 1.5, 'F')
-    doc.setTextColor(...BRAND.white)
+    doc.roundedRect(rX - sBadgeW, sBadgeY, sBadgeW, sBadgeH, 2, 2, 'F')
+    doc.setTextColor(...B.white)
     doc.setFontSize(7)
     doc.setFont('helvetica', 'bold')
-    doc.text(statusText, pageW - m - 20, 34.8, { align: 'center' })
+    doc.text(statusText, rX - sBadgeW / 2, sBadgeY + 5.5, { align: 'center' })
 
-    // ══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
     // BODY CONTENT
-    // ══════════════════════════════════════════════
-    let y = 54
+    // ══════════════════════════════════════════════════════════
+    y = headerTop + headerH + 10  // start below header
 
     // ── Client Details ──
-    y = sectionTitle(doc, 'Client Details', m, pageW, y, BRAND.teal)
+    y = drawSectionTitle(doc, 'Client Details', mL, pageW, y, B.teal)
 
-    doc.setTextColor(...BRAND.dark)
     doc.setFontSize(10)
-    const clientInfo = [
+    const clientRows: [string, string][] = [
       ['Company Name', quote.client?.companyName || '—'],
       ['Sector', quote.client?.sector || '—'],
       ['Company Size', quote.client?.companySize || '—'],
       ['Country', quote.client?.country || 'India'],
     ]
-    for (const [label, value] of clientInfo) {
+
+    for (const [label, value] of clientRows) {
       doc.setFont('helvetica', 'bold')
-      doc.text(`${label}:`, m, y)
+      doc.setTextColor(...B.dark)
+      doc.text(`${label}:`, mL, y)
       doc.setFont('helvetica', 'normal')
-      doc.text(String(value), m + 42, y)
+      doc.text(String(value), mL + 42, y)
       y += 6
     }
 
+    // Contacts
     let contacts: Array<{ name: string; email: string; phone?: string; role?: string }> = []
     if (quote.client?.contactsJson) {
       try { contacts = JSON.parse(quote.client.contactsJson) } catch { /* ignore */ }
     }
-    if (contacts.length > 0) {
-      for (const c of contacts) {
+    for (const c of contacts) {
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(...B.dark)
+      doc.text('Contact:', mL, y)
+      doc.setFont('helvetica', 'normal')
+      const contactText = `${c.name}${c.role ? ` (${c.role})` : ''} — ${c.email}${c.phone ? ` — ${c.phone}` : ''}`
+      doc.text(contactText, mL + 42, y)
+      y += 6
+    }
+    y += 4
+
+    // ── Compliance Services (Framework & Tier) ──
+    y = drawSectionTitle(doc, 'Compliance Services', mL, pageW, y, B.teal)
+
+    // Show all frameworks from consulting_fee line items
+    const consultingLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'consulting_fee')
+    const retainerLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'retainer')
+
+    doc.setFontSize(10)
+    doc.setTextColor(...B.dark)
+
+    if (consultingLines.length > 0) {
+      // Bulleted list of frameworks
+      for (const cl of consultingLines) {
+        // Extract framework name from "Framework Name — Consulting Fee (Tier)"
+        const fwName = cl.description.replace(/ — Consulting Fee.*/, '')
         doc.setFont('helvetica', 'bold')
-        doc.text('Contact:', m, y)
+        doc.text('•', mL + 2, y)
         doc.setFont('helvetica', 'normal')
-        doc.text(`${c.name} (${c.role || 'N/A'}) — ${c.email}${c.phone ? ` — ${c.phone}` : ''}`, m + 42, y)
+        doc.text(fwName, mL + 7, y)
         y += 6
       }
+    } else if (quote.framework) {
+      doc.text(quote.framework.name, mL, y)
+      y += 6
     }
-    y += 6
 
-    // ── Framework & Tier ──
-    y = sectionTitle(doc, 'Framework & Tier', m, pageW, y, BRAND.teal)
-    doc.setTextColor(...BRAND.dark)
-    doc.setFontSize(10)
+    // Tier and FX Rate on the same row
+    const tierFxY = y + 2
     doc.setFont('helvetica', 'bold')
-    doc.text('Framework:', m, y)
+    doc.setTextColor(...B.dark)
+    doc.text('Tier:', mL, tierFxY)
     doc.setFont('helvetica', 'normal')
-    doc.text(quote.framework?.name || '—', m + 30, y)
-    y += 6
+    doc.text(quote.tier?.name || '—', mL + 14, tierFxY)
+
     doc.setFont('helvetica', 'bold')
-    doc.text('Tier:', m, y)
+    doc.text('FX Rate:', mL + 80, tierFxY)
     doc.setFont('helvetica', 'normal')
-    doc.text(quote.tier?.name || '—', m + 30, y)
-    y += 6
-    doc.setFont('helvetica', 'bold')
-    doc.text('FX Rate:', m, y)
-    doc.setFont('helvetica', 'normal')
-    doc.text(`USD/INR ${quote.usdInrRateSnapshot}`, m + 30, y)
-    y += 10
+    doc.text(`USD/INR ${quote.usdInrRateSnapshot}`, mL + 100, tierFxY)
+    y = tierFxY + 10
 
     // ── Line Items Table ──
-    y = sectionTitle(doc, 'Line Items', m, pageW, y, BRAND.purple)
+    y = drawSectionTitle(doc, 'Pricing Breakdown', mL, pageW, y, B.purple)
 
     const billedLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType !== 'internal_time')
 
@@ -201,133 +252,162 @@ export async function GET(
       startY: y,
       head: [['#', 'Description', 'Type', 'Amount (INR)']],
       body: tableBody,
-      margin: { left: m, right: m },
+      margin: { left: mL, right: mR },
       headStyles: {
-        fillColor: [...BRAND.purple],
-        textColor: [...BRAND.white],
+        fillColor: [...B.purple],
+        textColor: [...B.white],
         fontStyle: 'bold',
         fontSize: 9,
+        cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
       },
-      bodyStyles: { fontSize: 9, textColor: [...BRAND.dark] },
-      alternateRowStyles: { fillColor: [...BRAND.lightGray] },
+      bodyStyles: {
+        fontSize: 8.5,
+        textColor: [...B.dark],
+        cellPadding: { top: 2.5, bottom: 2.5, left: 4, right: 4 },
+        lineColor: [...B.border],
+        lineWidth: 0.1,
+      },
+      alternateRowStyles: { fillColor: [...B.lightGray] },
       columnStyles: {
-        0: { cellWidth: 10, halign: 'center' },
+        0: { cellWidth: 8, halign: 'center' },
         1: { cellWidth: 'auto' },
-        2: { cellWidth: 35 },
-        3: { cellWidth: 35, halign: 'right' },
+        2: { cellWidth: 32 },
+        3: { cellWidth: 36, halign: 'right' },
       },
     })
 
-    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10
+    y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 100
+    y += 10
 
-    if (y > 240) { doc.addPage(); y = 20; }
+    // Page break check
+    if (y > 235) { doc.addPage(); y = 20; }
 
     // ── Summary / Totals ──
-    y = sectionTitle(doc, 'Summary', m, pageW, y, BRAND.teal)
-    y += 4
+    y = drawSectionTitle(doc, 'Summary', mL, pageW, y, B.teal)
+    y += 2
 
-    const rightCol = pageW - m
+    const rightCol = pageW - mR
 
-    const addLine = (label: string, value: string, bold = false, color: readonly number[] = BRAND.dark) => {
-      doc.setTextColor(...color)
-      doc.setFont('helvetica', bold ? 'bold' : 'normal')
-      doc.setFontSize(10)
-      doc.text(label, m, y)
-      doc.text(value, rightCol, y, { align: 'right' })
+    // Subtotal
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.setTextColor(...B.dark)
+    doc.text('Subtotal', mL, y)
+    doc.text(formatINR(quote.subtotalInr), rightCol, y, { align: 'right' })
+    y += 7
+
+    // Discount
+    if (quote.discountInr > 0) {
+      const discLabel = quote.discountPct > 0 ? `Discount (${quote.discountPct}%)` : 'Discount'
+      doc.setTextColor(220, 38, 38)
+      doc.text(discLabel, mL, y)
+      doc.text(`-${formatINR(quote.discountInr)}`, rightCol, y, { align: 'right' })
       y += 7
     }
 
-    addLine('Subtotal', formatINR(quote.subtotalInr))
-    if (quote.discountInr > 0) {
-      const discLabel = quote.discountPct > 0 ? `Discount (${quote.discountPct}%)` : 'Discount'
-      addLine(discLabel, `-${formatINR(quote.discountInr)}`, false, [220, 38, 38])
-    }
-    addLine(`GST @ ${quote.gstRateSnapshot}%`, formatINR(quote.gstAmountInr))
+    // GST
+    doc.setTextColor(...B.dark)
+    doc.text(`GST @ ${quote.gstRateSnapshot}%`, mL, y)
+    doc.text(formatINR(quote.gstAmountInr), rightCol, y, { align: 'right' })
+    y += 4
 
-    // Grand total with brand highlight
-    doc.setFillColor(...BRAND.purpleLight)
-    doc.rect(m, y - 3, colW, 10, 'F')
-    doc.setDrawColor(...BRAND.purple)
-    doc.setLineWidth(0.3)
-    doc.rect(m, y - 3, colW, 10, 'S')
-    doc.setTextColor(...BRAND.purple)
+    // Grand total highlight box
+    y += 4
+    const gtBoxH = 12
+    doc.setFillColor(...B.purpleLight)
+    doc.roundedRect(mL, y, contentW, gtBoxH, 2, 2, 'F')
+    doc.setDrawColor(...B.purple)
+    doc.setLineWidth(0.4)
+    doc.roundedRect(mL, y, contentW, gtBoxH, 2, 2, 'S')
+
+    doc.setTextColor(...B.purple)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(11)
-    doc.text('Grand Total (INR)', m + 4, y + 4)
-    doc.text(formatINR(quote.totalInr), rightCol - 4, y + 4, { align: 'right' })
-    y += 14
+    doc.setFontSize(12)
+    doc.text('Grand Total (INR)', mL + 6, y + 8)
+    doc.text(formatINR(quote.totalInr), rightCol - 6, y + 8, { align: 'right' })
+    y += gtBoxH + 6
 
-    doc.setTextColor(...BRAND.muted)
+    // USD equivalent
+    doc.setTextColor(...B.muted)
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
-    doc.text(`Grand Total (USD): ${formatUSD(quote.totalUsd)} @ ₹${quote.usdInrRateSnapshot}`, m, y)
+    doc.text(`Grand Total (USD): ${formatUSD(quote.totalUsd)} @ ₹${quote.usdInrRateSnapshot}`, mL, y)
     y += 10
 
+    // Retainer note
     if (quote.includeRetainer && quote.retainerAmountInr > 0) {
-      doc.setFillColor(...BRAND.orangeLight)
-      doc.roundedRect(m, y - 3, colW, 8, 1, 1, 'F')
-      doc.setTextColor(...BRAND.orange)
+      doc.setFillColor(...B.orangeLight)
+      doc.roundedRect(mL, y, contentW, 9, 1.5, 1.5, 'F')
+      doc.setTextColor(...B.orange)
       doc.setFontSize(8)
       doc.setFont('helvetica', 'bold')
-      doc.text(`Includes Annual Retainer: ${formatINR(quote.retainerAmountInr)}`, m + 4, y + 1.5)
-      y += 12
+      doc.text(`Includes Annual Retainer: ${formatINR(quote.retainerAmountInr)}`, mL + 4, y + 6)
+      y += 14
     }
 
     // ── Approval & Authorization ──
-    if (y > 220) { doc.addPage(); y = 20; }
-    y = sectionTitle(doc, 'Approval & Authorization', m, pageW, y, BRAND.purple)
+    if (y > 215) { doc.addPage(); y = 20; }
+    y = drawSectionTitle(doc, 'Approval & Authorization', mL, pageW, y, B.purple)
     y += 2
 
-    // Created By card
-    y = infoCard(doc, m, y, colW, 'Created By', [
+    y = drawInfoCard(doc, mL, y, contentW, 'Created By', [
       `${quote.createdBy?.name || 'System'} (${quote.createdBy?.role || 'N/A'})`,
       quote.createdBy?.email || '',
-    ], BRAND.teal, BRAND.tealLight)
+    ], B.teal, B.tealLight)
 
-    // Approved By card
+    y += 3
     if (quote.approvedBy) {
-      y = infoCard(doc, m, y + 4, colW, 'Approved By', [
+      y = drawInfoCard(doc, mL, y, contentW, 'Approved By', [
         `${quote.approvedBy.name} (${quote.approvedBy.role || 'N/A'})`,
         quote.approvedBy.email || '',
-      ], BRAND.teal, BRAND.tealLight)
+      ], B.teal, B.tealLight)
     } else {
-      y = infoCard(doc, m, y + 4, colW, 'Approved By', ['Pending Approval'], BRAND.orange, BRAND.orangeLight)
+      y = drawInfoCard(doc, mL, y, contentW, 'Approved By', ['Pending Approval'], B.orange, B.orangeLight)
     }
     y += 8
 
     // ── Payment Terms ──
-    if (y > 230) { doc.addPage(); y = 20; }
-    y = sectionTitle(doc, 'Payment Terms', m, pageW, y, BRAND.teal)
+    if (y > 225) { doc.addPage(); y = 20; }
+    y = drawSectionTitle(doc, 'Payment Terms', mL, pageW, y, B.teal)
     y += 2
 
-    const terms = [
-      ['Advance (40%)', formatINR(quote.totalInr * 0.4)],
-      ['Midway (40%)', formatINR(quote.totalInr * 0.4)],
-      ['On Completion (20%)', formatINR(quote.totalInr * 0.2)],
-    ]
-
-    // Payment schedule as a small styled table
     autoTable(doc, {
       startY: y,
-      body: terms,
-      margin: { left: m, right: m },
-      headStyles: { fillColor: [...BRAND.teal], textColor: [...BRAND.white], fontStyle: 'bold', fontSize: 9 },
       head: [['Milestone', 'Amount']],
-      bodyStyles: { fontSize: 9, textColor: [...BRAND.dark] },
-      alternateRowStyles: { fillColor: [...BRAND.tealLight] },
+      body: [
+        ['Advance (40%)', formatINR(quote.totalInr * 0.4)],
+        ['Midway (40%)', formatINR(quote.totalInr * 0.4)],
+        ['On Completion (20%)', formatINR(quote.totalInr * 0.2)],
+      ],
+      margin: { left: mL, right: mR },
+      headStyles: {
+        fillColor: [...B.teal],
+        textColor: [...B.white],
+        fontStyle: 'bold',
+        fontSize: 9,
+        cellPadding: { top: 3, bottom: 3, left: 4, right: 4 },
+      },
+      bodyStyles: {
+        fontSize: 9,
+        textColor: [...B.dark],
+        cellPadding: { top: 2.5, bottom: 2.5, left: 4, right: 4 },
+      },
+      alternateRowStyles: { fillColor: [...B.tealLight] },
       columnStyles: {
-        0: { cellWidth: 60, fontStyle: 'bold' },
-        1: { cellWidth: colW - 60, halign: 'right' },
+        0: { cellWidth: 65, fontStyle: 'bold' },
+        1: { cellWidth: contentW - 65, halign: 'right' },
       },
       theme: 'grid',
-      styles: { lineWidth: 0.1, lineColor: [...BRAND.border] },
+      styles: { lineWidth: 0.1, lineColor: [...B.border] },
     })
-    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10
+
+    y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? (y + 30)
+    y += 10
 
     // ── Approval Timeline ──
     if (quote.approvals && quote.approvals.length > 0) {
-      if (y > 220) { doc.addPage(); y = 20; }
-      y = sectionTitle(doc, 'Approval Timeline', m, pageW, y, BRAND.purple)
+      if (y > 215) { doc.addPage(); y = 20; }
+      y = drawSectionTitle(doc, 'Approval Timeline', mL, pageW, y, B.purple)
 
       const timelineBody = quote.approvals.map((a: { action: string; actor: { name: string; role: string }; comment: string | null; createdAt: string; amountBefore: number | null; amountAfter: number | null }) => [
         a.action.charAt(0).toUpperCase() + a.action.slice(1),
@@ -343,79 +423,91 @@ export async function GET(
         startY: y,
         head: [['Action', 'By', 'Comment', 'Amount Change', 'Date']],
         body: timelineBody,
-        margin: { left: m, right: m },
-        headStyles: { fillColor: [...BRAND.purple], textColor: [...BRAND.white], fontStyle: 'bold', fontSize: 8 },
-        bodyStyles: { fontSize: 8, textColor: [...BRAND.dark] },
-        alternateRowStyles: { fillColor: [...BRAND.lightGray] },
+        margin: { left: mL, right: mR },
+        headStyles: {
+          fillColor: [...B.purple],
+          textColor: [...B.white],
+          fontStyle: 'bold',
+          fontSize: 8,
+          cellPadding: { top: 2, bottom: 2, left: 3, right: 3 },
+        },
+        bodyStyles: {
+          fontSize: 7.5,
+          textColor: [...B.dark],
+          cellPadding: { top: 2, bottom: 2, left: 3, right: 3 },
+          overflow: 'linebreak',
+        },
+        alternateRowStyles: { fillColor: [...B.lightGray] },
         columnStyles: {
           0: { cellWidth: 22 },
-          1: { cellWidth: 28 },
-          2: { cellWidth: 55 },
-          3: { cellWidth: 35, halign: 'right' },
-          4: { cellWidth: 25 },
+          1: { cellWidth: 26 },
+          2: { cellWidth: 56 },
+          3: { cellWidth: 34, halign: 'right' },
+          4: { cellWidth: 28 },
         },
         theme: 'grid',
-        styles: { lineWidth: 0.1, lineColor: [...BRAND.border] },
+        styles: { lineWidth: 0.1, lineColor: [...B.border] },
       })
+
+      y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? (y + 30)
+      y += 10
     }
 
     // ── Internal Time (Advisory — Not Billed) ──
     const internalLines = (quote.lineItems || []).filter((l: { lineType: string }) => l.lineType === 'internal_time')
     if (internalLines.length > 0) {
-      const lastY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable
-      y = lastY ? lastY.finalY + 10 : y + 10
-      if (y > 240) { doc.addPage(); y = 20; }
+      if (y > 235) { doc.addPage(); y = 20; }
 
-      doc.setFillColor(...BRAND.lightGray)
-      doc.roundedRect(m, y - 5, colW, 6 + internalLines.length * 5, 2, 2, 'F')
-      doc.setTextColor(...BRAND.muted)
+      const boxH = 8 + internalLines.length * 5
+      doc.setFillColor(...B.lightGray)
+      doc.roundedRect(mL, y, contentW, boxH, 2, 2, 'F')
+      doc.setTextColor(...B.muted)
       doc.setFontSize(9)
       doc.setFont('helvetica', 'italic')
-      doc.text('Internal Time Cost (Advisory — Not Billed)', m + 5, y)
-      y += 5
+      doc.text('Internal Time Cost (Advisory — Not Billed)', mL + 5, y + 6)
+      y += 10
       for (const line of internalLines) {
-        doc.setFont('helvetica', 'italic')
-        doc.setFontSize(8)
-        doc.text(line.description, m + 8, y)
+        doc.text(line.description, mL + 8, y)
         y += 5
       }
+      y += 4
     }
 
     // ── Notes ──
     if (quote.notes) {
       if (y > 240) { doc.addPage(); y = 20; }
-      y += 6
-      y = sectionTitle(doc, 'Notes', m, pageW, y, BRAND.orange)
-      doc.setTextColor(...BRAND.dark)
+      y += 4
+      y = drawSectionTitle(doc, 'Notes', mL, pageW, y, B.orange)
+      doc.setTextColor(...B.dark)
       doc.setFontSize(9)
       doc.setFont('helvetica', 'normal')
-      const splitNotes = doc.splitTextToSize(quote.notes, colW)
-      doc.text(splitNotes, m, y + 2)
+      const splitNotes = doc.splitTextToSize(quote.notes, contentW)
+      doc.text(splitNotes, mL, y + 2)
     }
 
-    // ══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
     // FOOTER — On every page
-    // ══════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════
     const totalPages = doc.getNumberOfPages()
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i)
       const ph = doc.internal.pageSize.getHeight()
 
       // Teal accent bar at bottom
-      doc.setFillColor(...BRAND.teal)
-      doc.rect(0, ph - 2.5, pageW, 2.5, 'F')
+      doc.setFillColor(...B.teal)
+      doc.rect(0, ph - 3, pageW, 3, 'F')
 
       // Divider line
-      doc.setDrawColor(...BRAND.border)
+      doc.setDrawColor(...B.border)
       doc.setLineWidth(0.3)
-      doc.line(m, ph - 15, pageW - m, ph - 15)
+      doc.line(mL, ph - 16, pageW - mR, ph - 16)
 
       // Footer text
-      doc.setTextColor(...BRAND.muted)
+      doc.setTextColor(...B.muted)
       doc.setFontSize(7)
       doc.setFont('helvetica', 'normal')
-      doc.text('Confidential — iSecurify GRC Pricing Platform', m, ph - 8)
-      doc.text(`Valid until ${formatDate(quote.validUntil)}  |  Page ${i} of ${totalPages}`, pageW - m, ph - 8, { align: 'right' })
+      doc.text('Confidential — iSecurify GRC Pricing Platform', mL, ph - 8)
+      doc.text(`Valid until ${formatDate(quote.validUntil)}  |  Page ${i} of ${totalPages}`, pageW - mR, ph - 8, { align: 'right' })
     }
 
     const pdfBuffer = doc.output('arraybuffer')
@@ -432,8 +524,8 @@ export async function GET(
   }
 }
 
-// ── Helper: Draw a section title with teal underline ──
-function sectionTitle(
+// ── Helper: Draw a section title with colored underline ──
+function drawSectionTitle(
   doc: ReturnType<typeof import('jspdf').default>,
   title: string,
   margin: number,
@@ -441,11 +533,16 @@ function sectionTitle(
   y: number,
   color: readonly number[],
 ): number {
+  // Ensure we don't go off-page
+  if (y > 270) {
+    doc.addPage()
+    y = 20
+  }
   doc.setTextColor(...color)
   doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
   doc.text(title, margin, y)
-  y += 2
+  y += 2.5
   doc.setDrawColor(...color)
   doc.setLineWidth(0.6)
   doc.line(margin, y, pageW - margin, y)
@@ -453,7 +550,7 @@ function sectionTitle(
 }
 
 // ── Helper: Draw an info card with colored left border ──
-function infoCard(
+function drawInfoCard(
   doc: ReturnType<typeof import('jspdf').default>,
   x: number,
   y: number,
@@ -463,28 +560,31 @@ function infoCard(
   accentColor: readonly number[],
   bgColor: readonly number[],
 ): number {
-  const h = 6 + lines.filter(l => l).length * 5
+  const validLines = lines.filter(l => l)
+  const h = 8 + validLines.length * 5
+
   // Background
   doc.setFillColor(...bgColor)
-  doc.roundedRect(x, y - 3, w, h, 1.5, 1.5, 'F')
+  doc.roundedRect(x, y, w, h, 1.5, 1.5, 'F')
+
   // Left accent bar
   doc.setFillColor(...accentColor)
-  doc.rect(x, y - 3, 2.5, h, 'F')
+  doc.rect(x, y, 2.5, h, 'F')
+
   // Label
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(9)
   doc.setTextColor(...accentColor)
-  doc.text(label + ':', x + 6, y + 1)
+  doc.text(label + ':', x + 6, y + 5.5)
+
   // Value lines
   doc.setFont('helvetica', 'normal')
-  doc.setTextColor(...BRAND.dark)
+  doc.setTextColor(...B.dark)
   doc.setFontSize(9)
-  let ly = y + 6
-  for (const line of lines) {
-    if (line) {
-      doc.text(line, x + 6, ly)
-      ly += 5
-    }
+  let ly = y + 11
+  for (const line of validLines) {
+    doc.text(line, x + 6, ly)
+    ly += 5
   }
   return y + h + 2
 }

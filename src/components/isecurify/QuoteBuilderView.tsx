@@ -64,7 +64,7 @@ interface PricingData {
 const STEP_LABELS = ['Framework', 'Tier', 'Auditor', 'Add-ons', 'Tools & DPO', 'Review']
 
 export function QuoteBuilderView() {
-  const { selection, currentStep, setStep, nextStep, prevStep, update, reset } = useQuoteBuilderStore()
+  const { selection, currentStep, setStep, nextStep, prevStep, update, reset, toggleFramework } = useQuoteBuilderStore()
   const { navigate } = useNavStore()
 
   const { data: pricing, isLoading } = useQuery({
@@ -115,7 +115,7 @@ export function QuoteBuilderView() {
     )
   }
 
-  const canSubmit = !!selection.clientId && !!selection.frameworkId && !!selection.tierId
+  const canSubmit = !!selection.clientId && selection.selectedFrameworkIds.length > 0 && !!selection.tierId
 
   return (
     <>
@@ -255,14 +255,19 @@ function SummaryPanel({ selection, pricing, calc }: {
   calc: ReturnType<typeof calculateQuote> | null
 }) {
   if (!calc) return null
-  const framework = pricing.frameworks.find((f) => f.id === selection.frameworkId)
+  const selectedFrameworks = pricing.frameworks.filter((f) => selection.selectedFrameworkIds.includes(f.id))
   const tier = pricing.tiers.find((t) => t.id === selection.tierId)
 
   return (
     <div className="space-y-3">
       {calc.lines.filter((l) => l.lineType !== 'internal_time').length === 0 && (
         <p className="text-xs text-slate-400 py-4 text-center">
-          Select a framework and tier to see pricing
+          Select framework(s) and a tier to see pricing
+        </p>
+      )}
+      {selectedFrameworks.length > 0 && (
+        <p className="text-xs font-medium text-brand-700">
+          {selectedFrameworks.length} framework{selectedFrameworks.length > 1 ? 's' : ''} selected
         </p>
       )}
 
@@ -415,6 +420,18 @@ function StepFramework({ selection, update, pricing, clients }: {
     return acc
   }, {} as Record<string, Framework[]>)
 
+  const toggle = (id: string) => {
+    const ids = selection.selectedFrameworkIds
+    update({
+      selectedFrameworkIds: ids.includes(id)
+        ? ids.filter((x) => x !== id)
+        : [...ids, id],
+    })
+  }
+
+  const clearAll = () => update({ selectedFrameworkIds: [] })
+  const selectAll = () => update({ selectedFrameworkIds: pricing.frameworks.map((f) => f.id) })
+
   return (
     <div className="space-y-6">
       {/* FX Rate */}
@@ -436,8 +453,33 @@ function StepFramework({ selection, update, pricing, clients }: {
         </select>
       </SectionCard>
 
-      {/* Framework selection */}
-      <SectionCard title="2. Select Framework" description="Only one framework per quote — grouped by category">
+      {/* Framework selection — MULTI */}
+      <SectionCard
+        title="2. Select Framework(s)"
+        description="Choose one or more compliance services — all selected frameworks use the same tier"
+        action={
+          <div className="flex items-center gap-3">
+            {selection.selectedFrameworkIds.length > 0 && (
+              <button onClick={clearAll} className="text-xs font-medium text-rose-600 hover:text-rose-700">
+                Clear All
+              </button>
+            )}
+            {selection.selectedFrameworkIds.length < pricing.frameworks.length && (
+              <button onClick={selectAll} className="text-xs font-medium text-brand-700 hover:text-brand-800">
+                Select All
+              </button>
+            )}
+          </div>
+        }
+      >
+        {selection.selectedFrameworkIds.length > 0 && (
+          <div className="mb-4 rounded-lg bg-brand-50 border border-brand-200 px-3 py-2">
+            <p className="text-xs font-medium text-brand-700">
+              <Layers className="inline h-3.5 w-3.5 mr-1" />
+              {selection.selectedFrameworkIds.length} framework{selection.selectedFrameworkIds.length > 1 ? 's' : ''} selected
+            </p>
+          </div>
+        )}
         {Object.entries(grouped).map(([category, fws]) => {
           const meta = FRAMEWORK_CATEGORY_META[category] || { label: category, color: 'slate' }
           return (
@@ -447,8 +489,8 @@ function StepFramework({ selection, update, pricing, clients }: {
                 {fws.map((fw) => (
                   <PricingCard
                     key={fw.id}
-                    selected={selection.frameworkId === fw.id}
-                    onClick={() => update({ frameworkId: fw.id })}
+                    selected={selection.selectedFrameworkIds.includes(fw.id)}
+                    onClick={() => toggle(fw.id)}
                     title={fw.name}
                     description={fw.description || undefined}
                     badge={meta.label}
@@ -469,11 +511,11 @@ function StepTier({ selection, update, pricing }: {
   update: (p: Partial<QuoteBuilderSelection>) => void
   pricing: PricingData
 }) {
-  const framework = pricing.frameworks.find((f) => f.id === selection.frameworkId)
-  if (!framework) {
+  const selectedFws = pricing.frameworks.filter((f) => selection.selectedFrameworkIds.includes(f.id))
+  if (selectedFws.length === 0) {
     return (
       <SectionCard title="Select Tier">
-        <EmptyState title="No framework selected" description="Go back to Step 1 and select a framework first." />
+        <EmptyState title="No framework(s) selected" description="Go back to Step 1 and select at least one framework." />
       </SectionCard>
     )
   }
@@ -481,13 +523,22 @@ function StepTier({ selection, update, pricing }: {
   return (
     <SectionCard
       title="3. Select Tier"
-      description={`${framework.name} — pricing varies by company size`}
+      description={`${selectedFws.length === 1 ? selectedFws[0].name : `${selectedFws.length} frameworks`} — pricing varies by company size`}
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {pricing.tiers.map((tier) => {
-          const price = pricing.frameworkPrices.find(
-            (p) => p.frameworkId === framework.id && p.tierId === tier.id,
-          )
+          // Calculate total consulting fee across all selected frameworks for this tier
+          let totalFee = 0
+          let totalRetainer = 0
+          for (const fw of selectedFws) {
+            const price = pricing.frameworkPrices.find(
+              (p) => p.frameworkId === fw.id && p.tierId === tier.id,
+            )
+            if (price) {
+              totalFee += price.projectFeeInr
+              totalRetainer += price.retainerFeeInr
+            }
+          }
           return (
             <PricingCard
               key={tier.id}
@@ -495,9 +546,9 @@ function StepTier({ selection, update, pricing }: {
               onClick={() => update({ tierId: tier.id })}
               title={tier.name}
               subtitle={`Retainer: ${tier.retainerPct}%`}
-              fee={price?.projectFeeInr}
-              feeLabel="project fee"
-              description={price ? `+ ${formatINR(price.retainerFeeInr)} annual retainer` : undefined}
+              fee={totalFee}
+              feeLabel="total project fee"
+              description={totalRetainer > 0 ? `+ ${formatINR(totalRetainer)} annual retainer` : undefined}
             />
           )
         })}
@@ -515,7 +566,7 @@ function StepTier({ selection, update, pricing }: {
             <div>
               <p className="text-sm font-medium text-slate-900">Include Annual Retainer</p>
               <p className="text-xs text-slate-500">
-                Adds a separate retainer line item ({pricing.tiers.find((t) => t.id === selection.tierId)?.retainerPct}% of project fee)
+                Adds retainer line items for each selected framework ({pricing.tiers.find((t) => t.id === selection.tierId)?.retainerPct}% of each project fee)
               </p>
             </div>
           </label>
@@ -729,7 +780,7 @@ function StepReview({ selection, update, pricing, calc, clients }: {
   calc: ReturnType<typeof calculateQuote> | null
   clients: Client[]
 }) {
-  const framework = pricing.frameworks.find((f) => f.id === selection.frameworkId)
+  const selectedFws = pricing.frameworks.filter((f) => selection.selectedFrameworkIds.includes(f.id))
   const tier = pricing.tiers.find((t) => t.id === selection.tierId)
   const client = clients.find((c) => c.id === selection.clientId)
 
@@ -825,7 +876,7 @@ function StepReview({ selection, update, pricing, calc, clients }: {
       <SectionCard title="Review & Submit" description="Confirm the quote details before submitting for approval">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <ReviewItem icon={<Building2 className="h-4 w-4" />} label="Client" value={client?.companyName || '—'} />
-          <ReviewItem icon={<Layers className="h-4 w-4" />} label="Framework" value={framework?.name || '—'} />
+          <ReviewItem icon={<Layers className="h-4 w-4" />} label="Framework(s)" value={selectedFws.length === 0 ? '—' : selectedFws.length === 1 ? selectedFws[0].name : `${selectedFws.length} selected`} />
           <ReviewItem icon={<ShieldCheck className="h-4 w-4" />} label="Tier" value={tier?.name || '—'} />
           <ReviewItem icon={<Package className="h-4 w-4" />} label="Line items" value={`${calc?.lines.length || 0}`} />
         </div>

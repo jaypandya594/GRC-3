@@ -1,0 +1,869 @@
+     1→/**
+     2→ * iSecurify — Quote Builder 6-step wizard with live summary panel
+     3→ *
+     4→ * Steps:
+     5→ *  0. Client + Framework
+     6→ *  1. Tier (+ retainer toggle)
+     7→ *  2. Auditor fees
+     8→ *  3. Add-on services
+     9→ *  4. GRC Tool (optional) + DPO/vCISO
+    10→ *  5. Internal time + Discount + Review & Submit
+    11→ */
+    12→'use client'
+    13→
+    14→import { useState } from 'react'
+    15→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+    16→import { api } from '@/lib/api-client'
+    17→import { useQuoteBuilderStore, useNavStore } from '@/store'
+    18→import { calculateQuote, DEFAULT_QUOTE_BUILDER_SELECTION, FRAMEWORK_CATEGORY_META } from '@/lib/quoteCalculator'
+    19→import { formatINR, formatUSD } from '@/lib/currency'
+    20→import { TopBar } from '@/components/isecurify/Shell'
+    21→import { PricingCard, SectionCard, EmptyState } from '@/components/isecurify/Atoms'
+    22→import { cn } from '@/lib/utils'
+    23→import { toast } from 'sonner'
+    24→import {
+    25→  ChevronLeft,
+    26→  ChevronRight,
+    27→  Check,
+    28→  Loader2,
+    29→  Save,
+    30→  Send,
+    31→  RotateCcw,
+    32→  Building2,
+    33→  Layers,
+    34→  ShieldCheck,
+    35→  Package,
+    36→  Wrench,
+    37→  Clock,
+    38→  Banknote,
+    39→  Pencil,
+    40→  X,
+    41→} from 'lucide-react'
+    42→import type {
+    43→  Framework,
+    44→  Tier,
+    45→  AuditorFee,
+    46→  AddonService,
+    47→  GrcTool,
+    48→  DpoVcisoPackage,
+    49→  Client,
+    50→  QuoteBuilderSelection,
+    51→} from '@/types'
+    52→
+    53→interface PricingData {
+    54→  frameworks: Framework[]
+    55→  tiers: Tier[]
+    56→  frameworkPrices: Array<{ id: string; frameworkId: string; tierId: string; projectFeeInr: number; retainerFeeInr: number }>
+    57→  auditorFees: AuditorFee[]
+    58→  addonServices: AddonService[]
+    59→  grcTools: GrcTool[]
+    60→  dpoVcisoPackages: DpoVcisoPackage[]
+    61→  fxRate: number
+    62→}
+    63→
+    64→const STEP_LABELS = ['Framework', 'Tier', 'Auditor', 'Add-ons', 'Tools & DPO', 'Review']
+    65→
+    66→export function QuoteBuilderView() {
+    67→  const { selection, currentStep, setStep, nextStep, prevStep, update, reset } = useQuoteBuilderStore()
+    68→  const { navigate } = useNavStore()
+    69→
+    70→  const { data: pricing, isLoading } = useQuery({
+    71→    queryKey: ['pricing'],
+    72→    queryFn: () => api.get<PricingData>('/pricing'),
+    73→  })
+    74→
+    75→  const { data: clients } = useQuery({
+    76→    queryKey: ['clients'],
+    77→    queryFn: () => api.get<Client[]>('/clients'),
+    78→  })
+    79→
+    80→  const calc = pricing
+    81→    ? calculateQuote(selection, {
+    82→        frameworks: pricing.frameworks,
+    83→        tiers: pricing.tiers,
+    84→        frameworkPrices: pricing.frameworkPrices,
+    85→        auditorFees: pricing.auditorFees,
+    86→        addonServices: pricing.addonServices,
+    87→        grcTools: pricing.grcTools,
+    88→        dpoVcisoPackages: pricing.dpoVcisoPackages,
+    89→        usdInrRate: pricing.fxRate,
+    90→      })
+    91→    : null
+    92→
+    93→  const saveMutation = useMutation({
+    94→    mutationFn: (vars: { submit: boolean }) =>
+    95→      api.post('/quotes', { selection, submit: vars.submit }),
+    96→    onSuccess: (quote, vars) => {
+    97→      toast.success(vars.submit ? 'Quote submitted for review' : 'Draft saved')
+    98→      reset()
+    99→      navigate('quotes', { id: (quote as { id: string }).id })
+   100→    },
+   101→    onError: (e: Error) => toast.error(e.message),
+   102→  })
+   103→
+   104→  const submit = () => saveMutation.mutate({ submit: true })
+   105→  const saveDraft = () => saveMutation.mutate({ submit: false })
+   106→
+   107→  if (isLoading || !pricing) {
+   108→    return (
+   109→      <>
+   110→        <TopBar title="Quote Builder" subtitle="Loading pricing data..." />
+   111→        <div className="flex items-center justify-center py-20">
+   112→          <Loader2 className="h-6 w-6 animate-spin text-brand-600" />
+   113→        </div>
+   114→      </>
+   115→    )
+   116→  }
+   117→
+   118→  const canSubmit = !!selection.clientId && !!selection.frameworkId && !!selection.tierId
+   119→
+   120→  return (
+   121→    <>
+   122→      <TopBar
+   123→        title="Quote Builder"
+   124→        subtitle="Build a compliance proposal in 6 steps"
+   125→        action={
+   126→          <button
+   127→            onClick={() => { reset(); toast.info('Quote builder reset') }}
+   128→            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+   129→          >
+   130→            <RotateCcw className="h-4 w-4" /> Reset
+   131→          </button>
+   132→        }
+   133→      />
+   134→
+   135→      <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)]">
+   136→        {/* Left: wizard */}
+   137→        <div className="flex-1 p-4 md:p-8 space-y-6 lg:max-w-[calc(100%-22rem)] min-w-0">
+   138→          {/* Stepper */}
+   139→          <div className="flex items-center gap-1 overflow-x-auto pb-2">
+   140→            {STEP_LABELS.map((label, i) => {
+   141→              const done = i < currentStep
+   142→              const active = i === currentStep
+   143→              return (
+   144→                <button
+   145→                  key={label}
+   146→                  onClick={() => setStep(i)}
+   147→                  className="flex items-center gap-2 shrink-0"
+   148→                >
+   149→                  <span
+   150→                    className={cn(
+   151→                      'flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-colors',
+   152→                      done ? 'bg-brand-600 text-white' : active ? 'bg-brand-100 text-brand-700 ring-2 ring-brand-600' : 'bg-slate-100 text-slate-400',
+   153→                    )}
+   154→                  >
+   155→                    {done ? <Check className="h-3.5 w-3.5" /> : i + 1}
+   156→                  </span>
+   157→                  <span className={cn('text-xs font-medium hidden sm:inline', active ? 'text-brand-700' : 'text-slate-500')}>
+   158→                    {label}
+   159→                  </span>
+   160→                  {i < STEP_LABELS.length - 1 && <ChevronRight className="h-3 w-3 text-slate-300 mx-1" />}
+   161→                </button>
+   162→              )
+   163→            })}
+   164→          </div>
+   165→
+   166→          {/* Step content */}
+   167→          {currentStep === 0 && (
+   168→            <StepFramework
+   169→              selection={selection}
+   170→              update={update}
+   171→              pricing={pricing}
+   172→              clients={clients || []}
+   173→            />
+   174→          )}
+   175→          {currentStep === 1 && (
+   176→            <StepTier selection={selection} update={update} pricing={pricing} />
+   177→          )}
+   178→          {currentStep === 2 && (
+   179→            <StepAuditor selection={selection} update={update} pricing={pricing} />
+   180→          )}
+   181→          {currentStep === 3 && (
+   182→            <StepAddons selection={selection} update={update} pricing={pricing} />
+   183→          )}
+   184→          {currentStep === 4 && (
+   185→            <StepTools selection={selection} update={update} pricing={pricing} />
+   186→          )}
+   187→          {currentStep === 5 && (
+   188→            <StepReview
+   189→              selection={selection}
+   190→              update={update}
+   191→              pricing={pricing}
+   192→              calc={calc}
+   193→              clients={clients || []}
+   194→            />
+   195→          )}
+   196→
+   197→          {/* Navigation buttons */}
+   198→          <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+   199→            <button
+   200→              onClick={prevStep}
+   201→              disabled={currentStep === 0}
+   202→              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+   203→            >
+   204→              <ChevronLeft className="h-4 w-4" /> Back
+   205→            </button>
+   206→
+   207→            <div className="flex items-center gap-2">
+   208→              {currentStep === 5 ? (
+   209→                <>
+   210→                  <button
+   211→                    onClick={saveDraft}
+   212→                    disabled={!canSubmit || saveMutation.isPending}
+   213→                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+   214→                  >
+   215→                    <Save className="h-4 w-4" /> Save Draft
+   216→                  </button>
+   217→                  <button
+   218→                    onClick={submit}
+   219→                    disabled={!canSubmit || saveMutation.isPending}
+   220→                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-40"
+   221→                  >
+   222→                    {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+   223→                    Submit for Approval
+   224→                  </button>
+   225→                </>
+   226→              ) : (
+   227→                <button
+   228→                  onClick={nextStep}
+   229→                  disabled={currentStep === 5}
+   230→                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
+   231→                >
+   232→                  Next <ChevronRight className="h-4 w-4" />
+   233→                </button>
+   234→              )}
+   235→            </div>
+   236→          </div>
+   237→        </div>
+   238→
+   239→        {/* Right: live summary panel (sticky on desktop) */}
+   240→        <aside className="lg:w-[22rem] lg:border-l border-slate-200 bg-slate-50 p-4 md:p-6 lg:sticky lg:top-16 lg:self-start lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto">
+   241→          <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+   242→            <Banknote className="h-4 w-4 text-brand-700" /> Live Quote Summary
+   243→          </h3>
+   244→          <SummaryPanel selection={selection} pricing={pricing} calc={calc} />
+   245→        </aside>
+   246→      </div>
+   247→    </>
+   248→  )
+   249→}
+   250→
+   251→// ─── Summary Panel ─────────────────────────────────────────────
+   252→function SummaryPanel({ selection, pricing, calc }: {
+   253→  selection: QuoteBuilderSelection
+   254→  pricing: PricingData
+   255→  calc: ReturnType<typeof calculateQuote> | null
+   256→}) {
+   257→  if (!calc) return null
+   258→  const framework = pricing.frameworks.find((f) => f.id === selection.frameworkId)
+   259→  const tier = pricing.tiers.find((t) => t.id === selection.tierId)
+   260→
+   261→  return (
+   262→    <div className="space-y-3">
+   263→      {calc.lines.filter((l) => l.lineType !== 'internal_time').length === 0 && (
+   264→        <p className="text-xs text-slate-400 py-4 text-center">
+   265→          Select a framework and tier to see pricing
+   266→        </p>
+   267→      )}
+   268→
+   269→      {calc.lines.map((line, i) => {
+   270→        const isInternal = line.lineType === 'internal_time'
+   271→        const isDiscount = line.lineType === 'discount'
+   272→        return (
+   273→          <div
+   274→            key={i}
+   275→            className={cn(
+   276→              'flex items-start justify-between gap-2 text-sm',
+   277→              isInternal && 'opacity-60',
+   278→            )}
+   279→          >
+   280→            <span className={cn('text-slate-600 flex-1', isInternal && 'italic text-xs', isDiscount && 'text-rose-600')}>
+   281→              {line.description}
+   282→            </span>
+   283→            <span className={cn(
+   284→              'font-medium tabular-nums shrink-0',
+   285→              isInternal ? 'text-slate-400 text-xs' : isDiscount ? 'text-rose-600' : 'text-slate-900',
+   286→            )}>
+   287→              {line.amountInr < 0 ? '-' : ''}{formatINR(Math.abs(line.amountInr))}
+   288→            </span>
+   289→          </div>
+   290→        )
+   291→      })}
+   292→
+   293→      <div className="border-t border-slate-200 pt-3 space-y-1.5">
+   294→        <div className="flex justify-between text-sm">
+   295→          <span className="text-slate-600">Subtotal</span>
+   296→          <span className="font-medium text-slate-900">{formatINR(calc.subtotalInr)}</span>
+   297→        </div>
+   298→        {calc.discountInr > 0 && (
+   299→          <div className="flex justify-between text-sm">
+   300→            <span className="text-rose-600">Discount ({calc.discountPct}%)</span>
+   301→            <span className="font-medium text-rose-600">-{formatINR(calc.discountInr)}</span>
+   302→          </div>
+   303→        )}
+   304→        <div className="flex justify-between text-sm">
+   305→          <span className="text-slate-600">GST @ {calc.gstRate}%</span>
+   306→          <span className="font-medium text-slate-900">{formatINR(calc.gstAmountInr)}</span>
+   307→        </div>
+   308→        <div className="flex justify-between items-baseline pt-2 border-t border-slate-200">
+   309→          <span className="text-sm font-bold text-slate-900">Grand Total</span>
+   310→          <div className="text-right">
+   311→            <p className="text-lg font-bold text-brand-700">{formatINR(calc.totalInr)}</p>
+   312→            <p className="text-xs text-slate-500">{formatUSD(calc.totalUsd)} @ ₹{calc.usdInrRate}</p>
+   313→          </div>
+   314→        </div>
+   315→        {calc.internalTimeCostInr > 0 && (
+   316→          <p className="text-xs text-slate-400 italic pt-1">
+   317→            Advisory (not billed): {formatINR(calc.internalTimeCostInr)}
+   318→          </p>
+   319→        )}
+   320→      </div>
+   321→    </div>
+   322→  )
+   323→}
+   324→
+   325→// ─── Step 0: Client + Framework ────────────────────────────────
+   326→function FxRateCard({ currentRate }: { currentRate: number }) {
+   327→  const queryClient = useQueryClient()
+   328→  const [editing, setEditing] = useState(false)
+   329→  const [draft, setDraft] = useState(String(currentRate))
+   330→
+   331→  const updateFx = useMutation({
+   332→    mutationFn: (rate: number) => api.put('/admin/fx-rate', { rate }),
+   333→    onSuccess: () => {
+   334→      queryClient.invalidateQueries({ queryKey: ['pricing'] })
+   335→      toast.success('FX rate updated')
+   336→      setEditing(false)
+   337→    },
+   338→    onError: (e: Error) => toast.error(e.message),
+   339→  })
+   340→
+   341→  const handleSave = () => {
+   342→    const val = parseFloat(draft)
+   343→    if (isNaN(val) || val <= 0) {
+   344→      toast.error('Enter a valid positive rate')
+   345→      return
+   346→    }
+   347→    updateFx.mutate(val)
+   348→  }
+   349→
+   350→  const handleCancel = () => {
+   351→    setDraft(String(currentRate))
+   352→    setEditing(false)
+   353→  }
+   354→
+   355→  return (
+   356→    <div className="rounded-xl border border-slate-200 bg-white p-5">
+   357→      <div className="flex items-start justify-between gap-4">
+   358→        <div className="space-y-1">
+   359→          <h3 className="text-sm font-semibold text-slate-900">USD/INR Exchange Rate</h3>
+   360→          {!editing && (
+   361→            <p className="text-xs text-slate-500">This rate will be used to calculate USD equivalents</p>
+   362→          )}
+   363→        </div>
+   364→        {!editing ? (
+   365→          <div className="flex items-center gap-3">
+   366→            <span className="text-2xl font-bold text-brand-700 tabular-nums">{currentRate.toFixed(2)}</span>
+   367→            <button
+   368→              onClick={() => { setDraft(String(currentRate)); setEditing(true) }}
+   369→              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-100 transition-colors"
+   370→            >
+   371→              <Pencil className="h-3 w-3" /> Update Rate
+   372→            </button>
+   373→          </div>
+   374→        ) : (
+   375→          <div className="flex items-center gap-2">
+   376→            <input
+   377→              type="number"
+   378→              step={0.01}
+   379→              min={0.01}
+   380→              value={draft}
+   381→              onChange={(e) => setDraft(e.target.value)}
+   382→              onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') handleCancel() }}
+   383→              className="w-28 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand-600"
+   384→              autoFocus
+   385→            />
+   386→            <button
+   387→              onClick={handleSave}
+   388→              disabled={updateFx.isPending}
+   389→              className="inline-flex items-center gap-1 rounded-lg bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-800 disabled:opacity-50 transition-colors"
+   390→            >
+   391→              {updateFx.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Save
+   392→            </button>
+   393→            <button
+   394→              onClick={handleCancel}
+   395→              disabled={updateFx.isPending}
+   396→              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+   397→            >
+   398→              Cancel
+   399→            </button>
+   400→          </div>
+   401→        )}
+   402→      </div>
+   403→    </div>
+   404→  )
+   405→}
+   406→
+   407→function StepFramework({ selection, update, pricing, clients }: {
+   408→  selection: QuoteBuilderSelection
+   409→  update: (p: Partial<QuoteBuilderSelection>) => void
+   410→  pricing: PricingData
+   411→  clients: Client[]
+   412→}) {
+   413→  const grouped = pricing.frameworks.reduce((acc, fw) => {
+   414→    (acc[fw.category] ||= []).push(fw)
+   415→    return acc
+   416→  }, {} as Record<string, Framework[]>)
+   417→
+   418→  return (
+   419→    <div className="space-y-6">
+   420→      {/* FX Rate */}
+   421→      <FxRateCard currentRate={pricing.fxRate} />
+   422→
+   423→      {/* Client selection */}
+   424→      <SectionCard title="1. Select Client" description="Choose the prospect this quote is for">
+   425→        <select
+   426→          value={selection.clientId || ''}
+   427→          onChange={(e) => update({ clientId: e.target.value || null })}
+   428→          className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   429→        >
+   430→          <option value="">— Select a client —</option>
+   431→          {clients.map((c) => (
+   432→            <option key={c.id} value={c.id}>
+   433→              {c.companyName} ({c.sector || 'N/A'} • {c.companySize})
+   434→            </option>
+   435→          ))}
+   436→        </select>
+   437→      </SectionCard>
+   438→
+   439→      {/* Framework selection */}
+   440→      <SectionCard title="2. Select Framework" description="Only one framework per quote — grouped by category">
+   441→        {Object.entries(grouped).map(([category, fws]) => {
+   442→          const meta = FRAMEWORK_CATEGORY_META[category] || { label: category, color: 'slate' }
+   443→          return (
+   444→            <div key={category} className="mb-6 last:mb-0">
+   445→              <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">{meta.label}</h4>
+   446→              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+   447→                {fws.map((fw) => (
+   448→                  <PricingCard
+   449→                    key={fw.id}
+   450→                    selected={selection.frameworkId === fw.id}
+   451→                    onClick={() => update({ frameworkId: fw.id })}
+   452→                    title={fw.name}
+   453→                    description={fw.description || undefined}
+   454→                    badge={meta.label}
+   455→                  />
+   456→                ))}
+   457→              </div>
+   458→            </div>
+   459→          )
+   460→        })}
+   461→      </SectionCard>
+   462→    </div>
+   463→  )
+   464→}
+   465→
+   466→// ─── Step 1: Tier ──────────────────────────────────────────────
+   467→function StepTier({ selection, update, pricing }: {
+   468→  selection: QuoteBuilderSelection
+   469→  update: (p: Partial<QuoteBuilderSelection>) => void
+   470→  pricing: PricingData
+   471→}) {
+   472→  const framework = pricing.frameworks.find((f) => f.id === selection.frameworkId)
+   473→  if (!framework) {
+   474→    return (
+   475→      <SectionCard title="Select Tier">
+   476→        <EmptyState title="No framework selected" description="Go back to Step 1 and select a framework first." />
+   477→      </SectionCard>
+   478→    )
+   479→  }
+   480→
+   481→  return (
+   482→    <SectionCard
+   483→      title="3. Select Tier"
+   484→      description={`${framework.name} — pricing varies by company size`}
+   485→    >
+   486→      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+   487→        {pricing.tiers.map((tier) => {
+   488→          const price = pricing.frameworkPrices.find(
+   489→            (p) => p.frameworkId === framework.id && p.tierId === tier.id,
+   490→          )
+   491→          return (
+   492→            <PricingCard
+   493→              key={tier.id}
+   494→              selected={selection.tierId === tier.id}
+   495→              onClick={() => update({ tierId: tier.id })}
+   496→              title={tier.name}
+   497→              subtitle={`Retainer: ${tier.retainerPct}%`}
+   498→              fee={price?.projectFeeInr}
+   499→              feeLabel="project fee"
+   500→              description={price ? `+ ${formatINR(price.retainerFeeInr)} annual retainer` : undefined}
+   501→            />
+   502→          )
+   503→        })}
+   504→      </div>
+   505→
+   506→      {selection.tierId && (
+   507→        <div className="rounded-lg border border-slate-200 p-4 bg-slate-50">
+   508→          <label className="flex items-center gap-3 cursor-pointer">
+   509→            <input
+   510→              type="checkbox"
+   511→              checked={selection.includeRetainer}
+   512→              onChange={(e) => update({ includeRetainer: e.target.checked })}
+   513→              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+   514→            />
+   515→            <div>
+   516→              <p className="text-sm font-medium text-slate-900">Include Annual Retainer</p>
+   517→              <p className="text-xs text-slate-500">
+   518→                Adds a separate retainer line item ({pricing.tiers.find((t) => t.id === selection.tierId)?.retainerPct}% of project fee)
+   519→              </p>
+   520→            </div>
+   521→          </label>
+   522→        </div>
+   523→      )}
+   524→    </SectionCard>
+   525→  )
+   526→}
+   527→
+   528→// ─── Step 2: Auditor Fees ──────────────────────────────────────
+   529→function StepAuditor({ selection, update, pricing }: {
+   530→  selection: QuoteBuilderSelection
+   531→  update: (p: Partial<QuoteBuilderSelection>) => void
+   532→  pricing: PricingData
+   533→}) {
+   534→  // Group by standardName
+   535→  const grouped = pricing.auditorFees.reduce((acc, fee) => {
+   536→    (acc[fee.standardName] ||= []).push(fee)
+   537→    return acc
+   538→  }, {} as Record<string, AuditorFee[]>)
+   539→
+   540→  const toggle = (id: string) => {
+   541→    const ids = selection.selectedAuditorFeeIds
+   542→    update({
+   543→      selectedAuditorFeeIds: ids.includes(id)
+   544→        ? ids.filter((x) => x !== id)
+   545→        : [...ids, id],
+   546→    })
+   547→  }
+   548→
+   549→  const clearAll = () => update({ selectedAuditorFeeIds: [] })
+   550→
+   551→  return (
+   552→    <SectionCard
+   553→      title="4. Select Auditor Fees"
+   554→      description="Pass-through certification body costs — select all that apply"
+   555→      action={
+   556→        selection.selectedAuditorFeeIds.length > 0 && (
+   557→          <button onClick={clearAll} className="text-xs font-medium text-rose-600 hover:text-rose-700">
+   558→            Clear All
+   559→          </button>
+   560→        )
+   561→      }
+   562→    >
+   563→      <div className="space-y-5">
+   564→        {Object.entries(grouped).map(([standard, fees]) => (
+   565→          <div key={standard}>
+   566→            <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">{standard}</h4>
+   567→            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+   568→              {fees.map((fee) => (
+   569→                <PricingCard
+   570→                  key={fee.id}
+   571→                  selected={selection.selectedAuditorFeeIds.includes(fee.id)}
+   572→                  onClick={() => toggle(fee.id)}
+   573→                  title={fee.accreditationBody}
+   574→                  subtitle={fee.notes || undefined}
+   575→                  fee={fee.feeInr}
+   576→                />
+   577→              ))}
+   578→            </div>
+   579→          </div>
+   580→        ))}
+   581→      </div>
+   582→    </SectionCard>
+   583→  )
+   584→}
+   585→
+   586→// ─── Step 3: Add-ons ───────────────────────────────────────────
+   587→function StepAddons({ selection, update, pricing }: {
+   588→  selection: QuoteBuilderSelection
+   589→  update: (p: Partial<QuoteBuilderSelection>) => void
+   590→  pricing: PricingData
+   591→}) {
+   592→  const toggle = (id: string) => {
+   593→    const ids = selection.selectedAddonIds
+   594→    update({
+   595→      selectedAddonIds: ids.includes(id)
+   596→        ? ids.filter((x) => x !== id)
+   597→        : [...ids, id],
+   598→    })
+   599→  }
+   600→  const clearAll = () => update({ selectedAddonIds: [] })
+   601→
+   602→  return (
+   603→    <SectionCard
+   604→      title="5. Add-on Services"
+   605→      description="Optional bolt-on services — select all that apply"
+   606→      action={
+   607→        selection.selectedAddonIds.length > 0 && (
+   608→          <button onClick={clearAll} className="text-xs font-medium text-rose-600 hover:text-rose-700">
+   609→            Clear All
+   610→          </button>
+   611→        )
+   612→      }
+   613→    >
+   614→      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+   615→        {pricing.addonServices.map((addon) => (
+   616→          <PricingCard
+   617→            key={addon.id}
+   618→            selected={selection.selectedAddonIds.includes(addon.id)}
+   619→            onClick={() => toggle(addon.id)}
+   620→            title={addon.name}
+   621→            subtitle={addon.category.replace(/_/g, ' ')}
+   622→            description={addon.description || undefined}
+   623→            fee={addon.feeInr}
+   624→          />
+   625→        ))}
+   626→      </div>
+   627→    </SectionCard>
+   628→  )
+   629→}
+   630→
+   631→// ─── Step 4: GRC Tool + DPO/vCISO ──────────────────────────────
+   632→function StepTools({ selection, update, pricing }: {
+   633→  selection: QuoteBuilderSelection
+   634→  update: (p: Partial<QuoteBuilderSelection>) => void
+   635→  pricing: PricingData
+   636→}) {
+   637→  return (
+   638→    <div className="space-y-6">
+   639→      {/* GRC Tool */}
+   640→      <SectionCard title="6. GRC Tool (Optional)" description="Annual subscription to the GRC management platform">
+   641→        <label className="flex items-center gap-3 mb-4 cursor-pointer">
+   642→          <input
+   643→            type="checkbox"
+   644→            checked={selection.grcToolEnabled}
+   645→            onChange={(e) => update({ grcToolEnabled: e.target.checked })}
+   646→            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-600"
+   647→          />
+   648→          <span className="text-sm font-medium text-slate-900">Include GRC Tool subscription</span>
+   649→        </label>
+   650→
+   651→        {selection.grcToolEnabled && (
+   652→          <div className="space-y-4">
+   653→            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+   654→              {pricing.grcTools.map((tool) => (
+   655→                <PricingCard
+   656→                  key={tool.id}
+   657→                  selected={selection.grcToolId === tool.id && selection.grcToolCustomFee === null}
+   658→                  onClick={() => update({ grcToolId: tool.id, grcToolCustomFee: null })}
+   659→                  title={tool.planName}
+   660→                  subtitle={`Up to ${tool.maxUsers >= 999999 ? 'unlimited' : tool.maxUsers} users`}
+   661→                  fee={tool.feeInrAnnual}
+   662→                  feeLabel="/year"
+   663→                />
+   664→              ))}
+   665→            </div>
+   666→            <div className="rounded-lg border border-slate-200 p-4">
+   667→              <label className="flex items-center gap-3 cursor-pointer mb-2">
+   668→                <input
+   669→                  type="radio"
+   670→                  checked={selection.grcToolCustomFee !== null}
+   671→                  onChange={() => update({ grcToolCustomFee: 0 })}
+   672→                  className="h-4 w-4 border-slate-300 text-brand-600 focus:ring-brand-600"
+   673→                />
+   674→                <span className="text-sm font-medium text-slate-900">Custom amount</span>
+   675→              </label>
+   676→              {selection.grcToolCustomFee !== null && (
+   677→                <div className="flex items-center gap-2 ml-7">
+   678→                  <span className="text-sm text-slate-500">₹</span>
+   679→                  <input
+   680→                    type="number"
+   681→                    value={selection.grcToolCustomFee || ''}
+   682→                    onChange={(e) => update({ grcToolCustomFee: parseFloat(e.target.value) || 0 })}
+   683→                    placeholder="Enter custom annual fee"
+   684→                    className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   685→                  />
+   686→                </div>
+   687→              )}
+   688→            </div>
+   689→          </div>
+   690→        )}
+   691→      </SectionCard>
+   692→
+   693→      {/* DPO/vCISO */}
+   694→      <SectionCard title="7. DPO / vCISO Package (Optional)" description="Managed compliance service plans">
+   695→        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+   696→          {pricing.dpoVcisoPackages.map((pkg) => (
+   697→            <PricingCard
+   698→              key={pkg.id}
+   699→              selected={selection.dpoVcisoPackageId === pkg.id}
+   700→              onClick={() => update({
+   701→                dpoVcisoPackageId: selection.dpoVcisoPackageId === pkg.id ? null : pkg.id,
+   702→              })}
+   703→              title={`${pkg.serviceType} — ${pkg.name}`}
+   704→              subtitle={`${pkg.hoursPerMonth} hours/month`}
+   705→              fee={pkg.feeInrAnnual}
+   706→              feeLabel="/year"
+   707→              description={pkg.description || undefined}
+   708→            />
+   709→          ))}
+   710→        </div>
+   711→        {selection.dpoVcisoPackageId && (
+   712→          <button
+   713→            onClick={() => update({ dpoVcisoPackageId: null })}
+   714→            className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-rose-600 hover:text-rose-700"
+   715→          >
+   716→            <X className="h-3 w-3" /> Remove DPO/vCISO package
+   717→          </button>
+   718→        )}
+   719→      </SectionCard>
+   720→    </div>
+   721→  )
+   722→}
+   723→
+   724→// ─── Step 5: Internal time + Discount + Review ─────────────────
+   725→function StepReview({ selection, update, pricing, calc, clients }: {
+   726→  selection: QuoteBuilderSelection
+   727→  update: (p: Partial<QuoteBuilderSelection>) => void
+   728→  pricing: PricingData
+   729→  calc: ReturnType<typeof calculateQuote> | null
+   730→  clients: Client[]
+   731→}) {
+   732→  const framework = pricing.frameworks.find((f) => f.id === selection.frameworkId)
+   733→  const tier = pricing.tiers.find((t) => t.id === selection.tierId)
+   734→  const client = clients.find((c) => c.id === selection.clientId)
+   735→
+   736→  return (
+   737→    <div className="space-y-6">
+   738→      {/* Internal time */}
+   739→      <SectionCard title="8. Internal Time (Advisory)" description="Not billed — shown separately for internal costing">
+   740→        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+   741→          <div>
+   742→            <label className="text-xs font-medium text-slate-600">Estimated hours</label>
+   743→            <input
+   744→              type="number"
+   745→              value={selection.internalHours || ''}
+   746→              onChange={(e) => update({ internalHours: parseInt(e.target.value) || 0 })}
+   747→              placeholder="0"
+   748→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   749→            />
+   750→          </div>
+   751→          <div>
+   752→            <label className="text-xs font-medium text-slate-600">Hourly rate (₹)</label>
+   753→            <input
+   754→              type="number"
+   755→              value={selection.internalHourlyRate || ''}
+   756→              onChange={(e) => update({ internalHourlyRate: parseFloat(e.target.value) || 0 })}
+   757→              placeholder="0"
+   758→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   759→            />
+   760→          </div>
+   761→          <div>
+   762→            <label className="text-xs font-medium text-slate-600">Total advisory cost</label>
+   763→            <div className="mt-1 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
+   764→              {formatINR((selection.internalHours || 0) * (selection.internalHourlyRate || 0))}
+   765→              <span className="ml-1 text-xs font-normal text-slate-400">(not billed)</span>
+   766→            </div>
+   767→          </div>
+   768→        </div>
+   769→      </SectionCard>
+   770→
+   771→      {/* Discount (Finance only — but shown for demo) */}
+   772→      <SectionCard title="9. Discount (Finance Override)" description="Applied by Finance before approval — reduces subtotal">
+   773→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   774→          <div>
+   775→            <label className="text-xs font-medium text-slate-600">Discount (%)</label>
+   776→            <input
+   777→              type="number"
+   778→              value={selection.discountPct || ''}
+   779→              onChange={(e) => update({ discountPct: parseFloat(e.target.value) || 0 })}
+   780→              placeholder="0"
+   781→              max="100"
+   782→              step="0.5"
+   783→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   784→            />
+   785→          </div>
+   786→          <div>
+   787→            <label className="text-xs font-medium text-slate-600">Reason</label>
+   788→            <input
+   789→              type="text"
+   790→              value={selection.discountReason}
+   791→              onChange={(e) => update({ discountReason: e.target.value })}
+   792→              placeholder="e.g., Strategic discount, bundle pricing"
+   793→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   794→            />
+   795→          </div>
+   796→        </div>
+   797→      </SectionCard>
+   798→
+   799→      {/* Quote options */}
+   800→      <SectionCard title="10. Quote Options">
+   801→        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   802→          <div>
+   803→            <label className="text-xs font-medium text-slate-600">Validity (days)</label>
+   804→            <input
+   805→              type="number"
+   806→              value={selection.validUntilDays}
+   807→              onChange={(e) => update({ validUntilDays: parseInt(e.target.value) || 30 })}
+   808→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   809→            />
+   810→          </div>
+   811→          <div>
+   812→            <label className="text-xs font-medium text-slate-600">Notes (internal)</label>
+   813→            <input
+   814→              type="text"
+   815→              value={selection.notes}
+   816→              onChange={(e) => update({ notes: e.target.value })}
+   817→              placeholder="Optional internal notes"
+   818→              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
+   819→            />
+   820→          </div>
+   821→        </div>
+   822→      </SectionCard>
+   823→
+   824→      {/* Review summary */}
+   825→      <SectionCard title="Review & Submit" description="Confirm the quote details before submitting for approval">
+   826→        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+   827→          <ReviewItem icon={<Building2 className="h-4 w-4" />} label="Client" value={client?.companyName || '—'} />
+   828→          <ReviewItem icon={<Layers className="h-4 w-4" />} label="Framework" value={framework?.name || '—'} />
+   829→          <ReviewItem icon={<ShieldCheck className="h-4 w-4" />} label="Tier" value={tier?.name || '—'} />
+   830→          <ReviewItem icon={<Package className="h-4 w-4" />} label="Line items" value={`${calc?.lines.length || 0}`} />
+   831→        </div>
+   832→
+   833→        {calc && (
+   834→          <div className="rounded-lg bg-brand-50 border border-brand-200 p-4">
+   835→            <div className="flex items-center justify-between">
+   836→              <div>
+   837→                <p className="text-xs text-brand-700 font-medium">Grand Total (incl. GST @ {calc.gstRate}%)</p>
+   838→                <p className="text-xs text-brand-600">Valid for {selection.validUntilDays} days • USD @ ₹{calc.usdInrRate}</p>
+   839→              </div>
+   840→              <div className="text-right">
+   841→                <p className="text-2xl font-bold text-brand-800">{formatINR(calc.totalInr)}</p>
+   842→                <p className="text-xs text-brand-600">{formatUSD(calc.totalUsd)}</p>
+   843→              </div>
+   844→            </div>
+   845→          </div>
+   846→        )}
+   847→
+   848→        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+   849→          <p className="text-xs text-amber-800">
+   850→            <Clock className="inline h-3.5 w-3.5 mr-1" />
+   851→            Submitting will route this quote through the approval workflow: Sales Manager → Finance → Approved → Sent.
+   852→          </p>
+   853→        </div>
+   854→      </SectionCard>
+   855→    </div>
+   856→  )
+   857→}
+   858→
+   859→function ReviewItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+   860→  return (
+   861→    <div className="rounded-lg border border-slate-200 p-3">
+   862→      <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+   863→        {icon} {label}
+   864→      </div>
+   865→      <p className="text-sm font-semibold text-slate-900 truncate">{value}</p>
+   866→    </div>
+   867→  )
+   868→}
+   869→

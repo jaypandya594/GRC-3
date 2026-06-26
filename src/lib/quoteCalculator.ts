@@ -83,36 +83,38 @@ export function calculateQuote(
   let subtotal = 0
   let retainerAmount = 0
 
-  // 1. Consulting fee (framework × tier)
-  if (selection.frameworkId && selection.tierId) {
-    const price = resolveFrameworkPrice(
-      selection.frameworkId,
-      selection.tierId,
-      ctx.frameworkPrices,
-    )
-    const framework = ctx.frameworks.find((f) => f.id === selection.frameworkId)
-    const tier = ctx.tiers.find((t) => t.id === selection.tierId)
-    if (price && framework && tier) {
-      lines.push({
-        lineType: 'consulting_fee',
-        description: `${framework.name} — Consulting Fee (${tier.name})`,
-        referenceId: framework.id,
-        amountInr: price.projectFeeInr,
-        sortOrder: sortOrder++,
-      })
-      subtotal += price.projectFeeInr
-
-      // Retainer (if toggled)
-      if (selection.includeRetainer && price.retainerFeeInr > 0) {
-        retainerAmount = price.retainerFeeInr
+  // 1. Consulting fees (multiple frameworks)
+  for (const fwId of selection.selectedFrameworkIds) {
+    if (selection.tierId) {
+      const price = resolveFrameworkPrice(
+        fwId,
+        selection.tierId,
+        ctx.frameworkPrices,
+      )
+      const framework = ctx.frameworks.find((f) => f.id === fwId)
+      const tier = ctx.tiers.find((t) => t.id === selection.tierId)
+      if (price && framework && tier) {
         lines.push({
-          lineType: 'retainer',
-          description: `Annual Retainer (${tier.retainerPct}% of project fee)`,
-          referenceId: tier.id,
-          amountInr: price.retainerFeeInr,
+          lineType: 'consulting_fee',
+          description: `${framework.name} — Consulting Fee (${tier.name})`,
+          referenceId: framework.id,
+          amountInr: price.projectFeeInr,
           sortOrder: sortOrder++,
         })
-        subtotal += price.retainerFeeInr
+        subtotal += price.projectFeeInr
+
+        // Retainer (if toggled, apply per-framework)
+        if (selection.includeRetainer && price.retainerFeeInr > 0) {
+          retainerAmount += price.retainerFeeInr
+          lines.push({
+            lineType: 'retainer',
+            description: `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
+            referenceId: tier.id,
+            amountInr: price.retainerFeeInr,
+            sortOrder: sortOrder++,
+          })
+          subtotal += price.retainerFeeInr
+        }
       }
     }
   }
@@ -316,7 +318,7 @@ export const FRAMEWORK_CATEGORY_META: Record<string, { label: string; color: str
 
 export const DEFAULT_QUOTE_BUILDER_SELECTION: QuoteBuilderSelection = {
   clientId: null,
-  frameworkId: null,
+  selectedFrameworkIds: [],
   tierId: null,
   includeRetainer: false,
   selectedAuditorFeeIds: [],

@@ -33,20 +33,23 @@ export async function computeQuote(
   let subtotal = 0
   let retainerAmount = 0
 
-  // 1. Consulting fee
-  if (selection.frameworkId && selection.tierId) {
-    const price = await db.frameworkPrice.findFirst({
-      where: {
-        frameworkId: selection.frameworkId,
-        tierId: selection.tierId,
-        OR: [{ tenantId: null }, { tenantId: TENANT_ID }],
-      },
-    })
-    if (price) {
-      subtotal += price.projectFeeInr
-      if (selection.includeRetainer && price.retainerFeeInr > 0) {
-        retainerAmount = price.retainerFeeInr
-        subtotal += price.retainerFeeInr
+  // 1. Consulting fees (multiple frameworks)
+  const fwIds = selection.selectedFrameworkIds || []
+  for (const fwId of fwIds) {
+    if (selection.tierId) {
+      const price = await db.frameworkPrice.findFirst({
+        where: {
+          frameworkId: fwId,
+          tierId: selection.tierId,
+          OR: [{ tenantId: null }, { tenantId: TENANT_ID }],
+        },
+      })
+      if (price) {
+        subtotal += price.projectFeeInr
+        if (selection.includeRetainer && price.retainerFeeInr > 0) {
+          retainerAmount += price.retainerFeeInr
+          subtotal += price.retainerFeeInr
+        }
       }
     }
   }

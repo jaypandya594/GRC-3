@@ -202,7 +202,7 @@ export function QuotesListView() {
                         <p className="font-medium text-slate-900">{q.client?.companyName || 'Unknown'}</p>
                         <p className="text-xs text-slate-500">v{q.version}</p>
                       </td>
-                      <td className="px-4 py-3 hidden md:table-cell text-slate-600">{q.framework?.name}</td>
+                      <td className="px-4 py-3 hidden md:table-cell text-slate-600">{getFrameworkNamesFromLines(q)}</td>
                       <td className="px-4 py-3"><StatusBadge status={q.status} /></td>
                       <td className="px-4 py-3 text-right">
                         <p className="font-bold text-slate-900">{formatINR(q.totalInr)}</p>
@@ -413,7 +413,7 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
     <>
       <TopBar
         title={`Quote — ${quote.client?.companyName || 'Unknown'}`}
-        subtitle={`${quote.framework?.name} • ${quote.tier?.name} • v${quote.version}`}
+        subtitle={buildQuoteSubtitle(quote)}
         action={
           <button
             onClick={() => navigate('quotes')}
@@ -445,7 +445,7 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <Meta label="Framework" value={quote.framework?.name || '—'} />
+              <Meta label="Framework(s)" value={getAllFrameworkNames(quote)} />
               <Meta label="Tier" value={quote.tier?.name || '—'} />
               <Meta label="Valid Until" value={formatDate(quote.validUntil)} />
               <Meta label="Created" value={formatDate(quote.createdAt)} />
@@ -724,6 +724,37 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
       </div>
     </>
   )
+}
+
+// ── Helpers ────────────────────────────────────────────────────
+function getFrameworkNamesFromLines(quote: Quote): string {
+  const consultingLines = (quote.lineItems || []).filter((l) => l.lineType === 'consulting_fee')
+  if (consultingLines.length > 1) {
+    return consultingLines
+      .map((l) => l.description.replace(/ — Consulting Fee.*/, '').trim())
+      .join(', ')
+  }
+  if (consultingLines.length === 1) {
+    return consultingLines[0].description.replace(/ — Consulting Fee.*/, '').trim()
+  }
+  return quote.framework?.name || '—'
+}
+
+function getAllFrameworkNames(quote: Quote): string {
+  const consultingLines = (quote.lineItems || []).filter((l) => l.lineType === 'consulting_fee')
+  if (consultingLines.length > 0) {
+    return consultingLines
+      .map((l) => l.description.replace(/ — Consulting Fee.*/, '').trim())
+      .join(', ')
+  }
+  return quote.framework?.name || '—'
+}
+
+function buildQuoteSubtitle(quote: Quote): string {
+  const fwNames = getAllFrameworkNames(quote)
+  // Truncate if too long
+  const fwDisplay = fwNames.length > 50 ? fwNames.slice(0, 47) + '...' : fwNames
+  return `${fwDisplay} • ${quote.tier?.name || '—'} • v${quote.version}`
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
