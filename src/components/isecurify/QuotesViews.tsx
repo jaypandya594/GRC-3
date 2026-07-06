@@ -506,7 +506,7 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
                 {internalLines.map((line) => (
                   <div key={line.id} className="flex justify-between text-xs text-slate-500 italic">
                     <span>{line.description}</span>
-                    <span className="tabular-nums">{formatINR(line.amountInr)}</span>
+                    <span className="tabular-nums">{formatLineAmount(line.amountInr, quote.billingCurrency, quote.usdInrRateSnapshot)}</span>
                   </div>
                 ))}
               </div>

@@ -102,3 +102,29 @@ Stage Summary:
 - Internal time advisory lines intentionally left as formatINR (not billed)
 - INR rendering path untouched — formatLineAmount returns formatINR when billingCurrency !== USD
 ---
+---
+Task ID: 1
+Agent: main
+Task: Fix line items displaying ₹ in USD mode — replace remaining formatINR calls with shared formatLineAmount helper
+
+Work Log:
+- Read currency.ts — confirmed formatLineAmount and formatLineAmountPdf helpers already exist and work correctly
+- Read QuoteBuilderView.tsx — found line items (line 307), subtotal (316), discount (321) already use formatLineAmount ✓
+- Read QuotesViews.tsx — found line items (471), subtotal (481), discount (486), GST (491), grand total (496) already use formatLineAmount ✓
+- Read quote-pdf/[id]/route.ts — confirmed amtFmt uses formatLineAmountPdf everywhere ✓
+- Fixed 4 remaining formatINR calls in QuoteBuilderView.tsx:
+  - Line 327: GST amount → formatLineAmount(calc.gstAmountInr, calc.billingCurrency, calc.usdInrRate)
+  - Line 348: Advisory internal time → formatLineAmount(calc.internalTimeCostInr, calc.billingCurrency, calc.usdInrRate)
+  - Line 611: Tier card retainer tooltip → formatLineAmount(totalRetainer, selection.billingCurrency, pricing.fxRate)
+  - Line 918: Internal hours cost → formatLineAmount(hours*rate, selection.billingCurrency, pricing.fxRate)
+- Fixed 1 remaining formatINR call in QuotesViews.tsx:
+  - Line 509: Advisory internal time → formatLineAmount(line.amountInr, quote.billingCurrency, quote.usdInrRateSnapshot)
+- Verified 2 remaining formatINR calls in QuoteBuilderView.tsx (lines 340, 1043) are in INR-only else branches — correct as-is
+- Confirmed subtotal uses the same formatLineAmount helper (no change needed)
+- Ran bun run lint — zero errors
+
+Stage Summary:
+- All line item amounts now use the single shared formatLineAmount helper across sidebar, Review step, saved-quote detail, and PDF
+- INR rendering path is untouched — formatLineAmount calls formatINR internally for INR mode
+- Lint passes clean
+

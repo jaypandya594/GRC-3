@@ -324,7 +324,7 @@ function SummaryPanel({ selection, pricing, calc }: {
         {calc.gstAmountInr > 0 && (
           <div className="flex justify-between text-sm">
             <span className="text-slate-600">GST @ {calc.gstRate}%</span>
-            <span className="font-medium text-slate-900">{formatINR(calc.gstAmountInr)}</span>
+            <span className="font-medium text-slate-900">{formatLineAmount(calc.gstAmountInr, calc.billingCurrency, calc.usdInrRate)}</span>
           </div>
         )}
         <div className="flex justify-between items-baseline pt-2 border-t border-slate-200">
@@ -345,7 +345,7 @@ function SummaryPanel({ selection, pricing, calc }: {
         </div>
         {calc.internalTimeCostInr > 0 && (
           <p className="text-xs text-slate-400 italic pt-1">
-            Advisory (not billed): {formatINR(calc.internalTimeCostInr)}
+            Advisory (not billed): {formatLineAmount(calc.internalTimeCostInr, calc.billingCurrency, calc.usdInrRate)}
           </p>
         )}
       </div>
@@ -608,7 +608,7 @@ function StepTier({ selection, update, pricing }: {
               subtitle={tier.description || `Retainer: ${tier.retainerPct}%`}
               fee={totalFee}
               feeLabel="total project fee"
-              description={totalRetainer > 0 ? `+ ${formatINR(totalRetainer)} annual retainer` : undefined}
+              description={totalRetainer > 0 ? `+ ${formatLineAmount(totalRetainer, selection.billingCurrency, pricing.fxRate)} annual retainer` : undefined}
             />
           )
         })}
@@ -915,7 +915,7 @@ function StepReview({ selection, update, pricing, calc, clients }: {
           <div>
             <label className="text-xs font-medium text-slate-600">Total advisory cost</label>
             <div className="mt-1 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
-              {formatINR((selection.internalHours || 0) * (selection.internalHourlyRate || 0))}
+              {formatLineAmount((selection.internalHours || 0) * (selection.internalHourlyRate || 0), selection.billingCurrency, pricing.fxRate)}
               <span className="ml-1 text-xs font-normal text-slate-400">(not billed)</span>
             </div>
           </div>
