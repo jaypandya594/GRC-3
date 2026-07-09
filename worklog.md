@@ -128,3 +128,24 @@ Stage Summary:
 - INR rendering path is untouched — formatLineAmount calls formatINR internally for INR mode
 - Lint passes clean
 
+---
+Task ID: 2
+Agent: main
+Task: Fix two FX rate bugs — (1) hardcoded default 83 in computeQuote calls, (2) stale sidebar widget
+
+Work Log:
+- Read /api/quotes/route.ts POST handler — computeQuote(selection) called without rate arg
+- Read /api/quotes/[id]/route.ts PUT handler — same issue
+- Read pricingEngine.ts — confirmed computeQuote(selection, usdInrRate=83, gstRate=GST_RATE) signature
+- BUG 1 FIX: Added db.fxRate.findFirst() before computeQuote in both routes, pass liveRate explicitly with ??83 fallback
+- Imported GST_RATE in both route files to also pass it explicitly
+- Read AdminView.tsx FxSection — found onSuccess only invalidates [pricing] and [dashboard]
+- Read QuoteBuilderView.tsx FxRateCard — found onSuccess only invalidates [pricing]
+- BUG 2 FIX: Added qc.invalidateQueries({ queryKey: [\"fx-rate-sidebar\"] }) in both mutation onSuccess handlers
+- Ran bun run lint — zero errors
+
+Stage Summary:
+- POST /api/quotes and PUT /api/quotes/[id] now use live FX rate from FxRate table
+- Shell.tsx sidebar widget refreshes immediately after FX rate updates from Admin or Builder
+- Lint passes clean
+

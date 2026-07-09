@@ -5,7 +5,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { TENANT_ID, CREATED_BY_ID, computeQuote } from '@/lib/server/pricingEngine'
+import { TENANT_ID, CREATED_BY_ID, GST_RATE, computeQuote } from '@/lib/server/pricingEngine'
 import { getNextStatus } from '@/lib/quoteCalculator'
 import { addDays } from 'date-fns'
 
@@ -80,8 +80,12 @@ export async function POST(req: NextRequest) {
     // Use first framework as the primary on the Quote record
     const primaryFrameworkId = fwIds[0]
 
-    // Compute quote using server-side engine
-    const computed = await computeQuote(selection)
+    // Fetch live FX rate from database (same query used by admin FX panel)
+    const fxRow = await db.fxRate.findFirst()
+    const liveRate = fxRow?.rate ?? 83
+
+    // Compute quote using server-side engine with the live configured rate
+    const computed = await computeQuote(selection, liveRate, GST_RATE)
     const validUntil = selection.validUntilDays
       ? addDays(new Date(), selection.validUntilDays)
       : null

@@ -6,7 +6,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { TENANT_ID, computeQuote } from '@/lib/server/pricingEngine'
+import { TENANT_ID, GST_RATE, computeQuote } from '@/lib/server/pricingEngine'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,7 +114,11 @@ export async function PUT(
       return NextResponse.json({ error: 'Selection is required' }, { status: 400 })
     }
 
-    const computed = await computeQuote(selection)
+    // Fetch live FX rate from database (same query used by admin FX panel)
+    const fxRow = await db.fxRate.findFirst()
+    const liveRate = fxRow?.rate ?? 83
+
+    const computed = await computeQuote(selection, liveRate, GST_RATE)
 
     const updated = await db.quote.update({
       where: { id },

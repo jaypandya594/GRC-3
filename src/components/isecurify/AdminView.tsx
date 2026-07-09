@@ -1132,6 +1132,7 @@ function FxSection({ rate: currentRate }: { rate: number }) {
       toast.success('FX rate updated')
       setEditing(false)
       qc.invalidateQueries({ queryKey: ['pricing'] })
+      qc.invalidateQueries({ queryKey: ['fx-rate-sidebar'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
     },
     onError: (e: Error) => toast.error(e.message),

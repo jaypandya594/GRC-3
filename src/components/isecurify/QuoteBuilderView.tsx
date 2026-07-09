@@ -363,6 +363,7 @@ function FxRateCard({ currentRate }: { currentRate: number }) {
     mutationFn: (rate: number) => api.put('/admin/fx-rate', { rate }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pricing'] })
+      queryClient.invalidateQueries({ queryKey: ['fx-rate-sidebar'] })
       toast.success('FX rate updated')
       setEditing(false)
     },
