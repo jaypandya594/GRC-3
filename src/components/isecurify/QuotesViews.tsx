@@ -206,7 +206,7 @@ export function QuotesListView() {
                       <td className="px-4 py-3"><StatusBadge status={q.status} /></td>
                       <td className="px-4 py-3 text-right">
                         <p className="font-bold text-slate-900">{formatLineAmount(q.totalInr, q.billingCurrency, q.usdInrRateSnapshot)}</p>
-                        <p className="text-xs text-slate-500">{formatUSD(q.totalUsd)}</p>
+                        {q.billingCurrency === 'USD' && <p className="text-xs text-slate-500">INR {formatINR(q.totalInr)}</p>}
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-slate-500 text-xs">
                         {formatRelativeTime(q.createdAt)}
@@ -494,7 +494,7 @@ export function QuoteDetailView({ quoteId }: { quoteId: string }) {
                 <span className="text-sm font-bold text-slate-900">Grand Total</span>
                 <div className="text-right">
                   <p className="text-xl font-bold text-brand-700">{formatLineAmount(quote.totalInr, quote.billingCurrency, quote.usdInrRateSnapshot)}</p>
-                  <p className="text-xs text-slate-500">{formatUSD(quote.totalUsd)} @ ₹{quote.usdInrRateSnapshot}</p>
+                  {quote.billingCurrency === 'USD' && <p className="text-xs text-slate-500">INR {formatINR(quote.totalInr)} @ ₹{quote.usdInrRateSnapshot}</p>}
                 </div>
               </div>
             </div>

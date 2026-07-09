@@ -338,7 +338,6 @@ function SummaryPanel({ selection, pricing, calc }: {
             ) : (
               <>
                 <p className="text-lg font-bold text-brand-700">{formatINR(calc.totalInr)}</p>
-                <p className="text-xs text-slate-500">{formatUSD(calc.totalUsd)} @ Rs.{calc.usdInrRate}</p>
               </>
             )}
           </div>
@@ -1034,7 +1033,7 @@ function StepReview({ selection, update, pricing, calc, clients }: {
                 ) : (
                   <p className="text-xs text-brand-700 font-medium">Grand Total (incl. GST @ {calc.gstRate}%)</p>
                 )}
-                <p className="text-xs text-brand-600">Valid for {selection.validUntilDays} days</p>
+                <p className="text-xs text-brand-600">Valid for {selection.validUntilDays} days{calc.billingCurrency === 'USD' ? ` • USD @ ₹${calc.usdInrRate}` : ''}</p>
               </div>
               <div className="text-right">
                 {calc.billingCurrency === 'USD' ? (
@@ -1042,7 +1041,6 @@ function StepReview({ selection, update, pricing, calc, clients }: {
                 ) : (
                   <>
                     <p className="text-2xl font-bold text-brand-800">{formatINR(calc.totalInr)}</p>
-                    <p className="text-xs text-brand-600">{formatUSD(calc.totalUsd)}</p>
                   </>
                 )}
               </div>

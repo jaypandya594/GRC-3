@@ -272,7 +272,7 @@ export async function GET(
     const tierDesc = (q.tier as { description?: string | null } | undefined)?.description
     doc.text(tierDesc ? `${tierLabel} (${tierDesc})` : tierLabel, mL + 14, tierFxY)
 
-    if (!isUsd) {
+    if (isUsd) {
       doc.setFont('helvetica', 'bold')
       doc.text('FX Rate:', mL + 100, tierFxY)
       doc.setFont('helvetica', 'normal')
@@ -382,12 +382,6 @@ export async function GET(
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(9)
       doc.text(`Equivalent INR: ${formatINRPdf(q.totalInr)} @ ${q.usdInrRateSnapshot}`, mL, y)
-      y += 10
-    } else {
-      doc.setTextColor(...B.muted)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(9)
-      doc.text(`Grand Total (USD): ${formatUSD(q.totalUsd)} @ ${q.usdInrRateSnapshot}`, mL, y)
       y += 10
     }
 

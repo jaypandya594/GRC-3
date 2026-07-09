@@ -149,3 +149,26 @@ Stage Summary:
 - Shell.tsx sidebar widget refreshes immediately after FX rate updates from Admin or Builder
 - Lint passes clean
 
+---
+Task ID: 3
+Agent: main
+Task: Hide FX rate display when billingCurrency is INR — show only when USD
+
+Work Log:
+- Searched all files for FX rate display patterns
+- PDF: Fixed inverted condition (if (!isUsd) → if (isUsd)) for FX Rate row on Tier line
+- PDF: Removed else branch that showed "Grand Total (USD): $XXX @ rate" when INR; kept "Equivalent INR" only for USD
+- Sidebar Grand Total: Removed "{formatUSD(calc.totalUsd)} @ Rs.{calc.usdInrRate}" from INR branch
+- Review Grand Total: Removed "{formatUSD(calc.totalUsd)}" from INR branch
+- Review "Valid for" line: Added conditional "• USD @ ₹{rate}" suffix only when USD
+- QuotesViews list table: Changed unconditional formatUSD(q.totalUsd) to conditional INR reference only when USD
+- QuotesViews detail Grand Total: Changed unconditional "@ ₹{rate}" to conditional, only shown when USD
+- Ran bun run lint — zero errors
+- Final grep for unguarded "@ Rs." / "@ ₹" — all remaining instances are properly guarded
+
+Stage Summary:
+- FX rate info is now completely absent when billingCurrency is INR across all views (sidebar, review, saved quotes, PDF)
+- FX rate is shown when USD: PDF shows FX Rate row + Equivalent INR, sidebar shows "No GST", review shows "• USD @ ₹rate"
+- No leftover labels, no empty lines, no vertical whitespace gaps
+- Lint passes clean
+
