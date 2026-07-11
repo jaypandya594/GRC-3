@@ -286,9 +286,9 @@ export async function GET(
     const billedLines = (q.lineItems || []).filter((l: { lineType: string }) => l.lineType !== 'internal_time')
     const amountColLabel = isUsd ? 'Amount (USD)' : 'Amount (INR)'
 
-    const tableBody = billedLines.map((item: { description: string; lineType: string; amountInr: number }, idx: number) => [
+    const tableBody = billedLines.map((item: { description: string; lineType: string; amountInr: number; isComplimentary?: boolean }, idx: number) => [
       String(idx + 1),
-      item.description,
+      item.isComplimentary ? `${item.description} (Complimentary)` : item.description,
       item.lineType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
       item.amountInr < 0 ? `-${amtFmt(Math.abs(item.amountInr))}` : amtFmt(item.amountInr),
     ])
@@ -333,18 +333,41 @@ export async function GET(
 
     const rightCol = pageW - mR
 
-    // Subtotal
+    // Compute complimentary breakdown from line items
+    const serviceLines = billedLines.filter((l: { lineType: string }) => l.lineType !== 'discount')
+    const totalServiceValue = serviceLines.reduce((s: number, l: { amountInr: number }) => s + l.amountInr, 0)
+    const complimentaryValue = serviceLines
+      .filter((l: { isComplimentary?: boolean }) => l.isComplimentary)
+      .reduce((s: number, l: { amountInr: number }) => s + l.amountInr, 0)
+
+    // Total Service Value (always shown)
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(10)
     doc.setTextColor(...B.dark)
-    doc.text('Subtotal', mL, y)
+    doc.text('Total Service Value', mL, y)
+    doc.text(amtFmt(totalServiceValue), rightCol, y, { align: 'right' })
+    y += 7
+
+    // Less: Complimentary Items (only if > 0)
+    if (complimentaryValue > 0) {
+      doc.setTextColor(...B.orange)
+      doc.text('Less: Complimentary Items', mL, y)
+      doc.text(`-${amtFmt(complimentaryValue)}`, rightCol, y, { align: 'right' })
+      y += 7
+    }
+
+    // Billable Subtotal
+    doc.setTextColor(...B.dark)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Billable Subtotal', mL, y)
     doc.text(amtFmt(q.subtotalInr), rightCol, y, { align: 'right' })
+    doc.setFont('helvetica', 'normal')
     y += 7
 
     // Discount
     if (q.discountInr > 0) {
       const isFixed = q.discountMode === 'fixed'
-      const discLabel = isFixed ? 'Discount (Fixed)' : `Discount (${q.discountPct}%)`
+      const discLabel = isFixed ? 'Less: Discount (Fixed)' : `Less: Discount (${q.discountPct}%)`
       doc.setTextColor(220, 38, 38)
       doc.text(discLabel, mL, y)
       doc.text(`-${amtFmt(q.discountInr)}`, rightCol, y, { align: 'right' })
@@ -368,7 +391,7 @@ export async function GET(
     doc.setLineWidth(0.4)
     doc.roundedRect(mL, y, contentW, gtBoxH, 2, 2, 'S')
 
-    const totalLabel = isUsd ? 'Grand Total (USD)' : 'Grand Total (INR)'
+    const totalLabel = isUsd ? 'Grand Total (USD)' : 'Grand Total (INR) — Net Payable'
     doc.setTextColor(...B.purple)
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(12)

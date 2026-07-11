@@ -172,3 +172,25 @@ Stage Summary:
 - No leftover labels, no empty lines, no vertical whitespace gaps
 - Lint passes clean
 
+
+---
+Task ID: 1
+Agent: Main
+Task: Implement Part 1 (Complimentary-Value Summary Breakdown) + Part 2 (Tier-wise Addon Pricing)
+
+Work Log:
+- Discovered that Part 2 (AddonServicePrice model, admin grid, API routes, DB backfill) was already implemented in prior sessions
+- Identified that Part 1 (complimentary summary) and several Part 2 frontend pieces were missing from disk
+- Updated types/index.ts: Added isComplimentary/customScope to QuoteLineItem, added complimentaryKeys/customScopes/internalHoursManuallySet to QuoteBuilderSelection
+- Rewrote quoteCalculator.ts: Added addonServicePrices to PricingContext, complimentary logic (isComp helper, compKeys), tier-specific addon pricing via getAddonFee pattern, three new fields (totalServiceValueInr, complimentaryValueInr, billableSubtotalInr)
+- Rewrote pricingEngine.ts: Added complimentary logic, tier-specific addon pricing via db.addonServicePrice lookup, same three new fields in ComputeQuoteResult
+- Rewrote QuoteBuilderView.tsx: Added CompToggle component, Tier badge on steps 2-5, updated PricingData with addonServicePrices, StepAddons uses tier-specific price lookup, added CompToggle on Framework/Auditor/Addon/GRC/DPO cards, updated SummaryPanel with Total Service Value → Less: Complimentary → Billable Subtotal → Discount → GST → Grand Total (Net Payable), updated StepReview with same breakdown
+- Updated PDF generation (quote-pdf/[id]/route.ts): Added Total Service Value, Less: Complimentary Items (conditional), renamed Subtotal to Billable Subtotal, added "Net Payable" to Grand Total label, added "(Complimentary)" to line item descriptions
+- Updated quotes API (quotes/route.ts): Added complimentaryKeys/customScopes to selection type, buildLineItems now sets isComplimentary on each line and uses tier-specific addon pricing via db.addonServicePrice
+
+Stage Summary:
+- All changes compile cleanly (bun run lint = 0 errors)
+- Dev server runs without errors
+- Browser verification confirmed: CompToggle on all card types, Tier badge on steps 2-5, summary panel shows correct breakdown with/without complimentary items, Review step shows same breakdown, addon prices use tier-specific lookup
+- No schema changes needed (AddonServicePrice model already existed)
+- No existing currency/GST/discount/retainer/approval/FX-rate logic was modified

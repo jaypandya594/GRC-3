@@ -28,6 +28,9 @@ export interface QuoteCalculation {
   gstRate: number
   usdInrRate: number
   billingCurrency: 'INR' | 'USD'
+  totalServiceValueInr: number
+  complimentaryValueInr: number
+  billableSubtotalInr: number
 }
 
 export interface PricingContext {
@@ -36,10 +39,18 @@ export interface PricingContext {
   frameworkPrices: FrameworkPrice[]
   auditorFees: AuditorFee[]
   addonServices: AddonService[]
+  addonServicePrices: Array<{ addonServiceId: string; tierId: string; priceInr: number }>
   grcTools: GrcTool[]
   dpoVcisoPackages: DpoVcisoPackage[]
   usdInrRate: number
   gstRate?: number
+}
+
+/**
+ * Check if a line item key is marked complimentary.
+ */
+function isComp(lineKey: string, compKeys: string[]): boolean {
+  return compKeys.includes(lineKey)
 }
 
 /**
@@ -72,6 +83,7 @@ export function resolveFrameworkPrice(
 
 /**
  * Calculate the full quote from a builder selection.
+ * Complimentary items are visible with their reference amount but contribute ₹0 to billable totals.
  */
 export function calculateQuote(
   selection: QuoteBuilderSelection,
@@ -79,37 +91,49 @@ export function calculateQuote(
 ): QuoteCalculation {
   const gstRate = ctx.gstRate ?? 18
   const usdInrRate = ctx.usdInrRate || 83
+  const compKeys = selection.complimentaryKeys || []
+  const customScopes = selection.customScopes || {}
   const lines: QuoteLineItem[] = []
   let sortOrder = 0
   let subtotal = 0
+  let totalServiceValue = 0
+  let complimentaryValue = 0
   let retainerAmount = 0
 
   // 1. Consulting fees (multiple frameworks)
   for (const fwId of selection.selectedFrameworkIds) {
     if (selection.tierId) {
-      const price = resolveFrameworkPrice(
-        fwId,
-        selection.tierId,
-        ctx.frameworkPrices,
-      )
+      const price = resolveFrameworkPrice(fwId, selection.tierId, ctx.frameworkPrices)
       const framework = ctx.frameworks.find((f) => f.id === fwId)
       const tier = ctx.tiers.find((t) => t.id === selection.tierId)
       if (price && framework && tier) {
+        const key = `framework:${fwId}`
+        const comp = isComp(key, compKeys)
+        const amt = comp ? 0 : price.projectFeeInr
+        totalServiceValue += price.projectFeeInr
+        if (comp) complimentaryValue += price.projectFeeInr
         lines.push({
           lineType: 'consulting_fee',
           description: `${framework.name} — Consulting Fee (${tier.name})`,
           referenceId: framework.id,
           amountInr: price.projectFeeInr,
+          isComplimentary: comp,
+          customScope: customScopes[fwId] || null,
           sortOrder: sortOrder++,
         })
-        subtotal += price.projectFeeInr
+        subtotal += amt
 
         // Retainer (if toggled, apply per-framework)
         if (selection.includeRetainer) {
           const isFixed = selection.retainerMode === 'fixed' && selection.retainerCustomInr != null && selection.retainerCustomInr > 0
-          const retainerFee = isFixed ? selection.retainerCustomInr : price.retainerFeeInr
+          const retainerFee = isFixed ? (selection.retainerCustomInr ?? 0) : price.retainerFeeInr
           if (retainerFee > 0) {
+            const rKey = 'retainer'
+            const rComp = isComp(rKey, compKeys)
+            const rAmt = rComp ? 0 : retainerFee
             retainerAmount += retainerFee
+            totalServiceValue += retainerFee
+            if (rComp) complimentaryValue += retainerFee
             lines.push({
               lineType: 'retainer',
               description: isFixed
@@ -117,9 +141,10 @@ export function calculateQuote(
                 : `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
               referenceId: tier.id,
               amountInr: retainerFee,
+              isComplimentary: rComp,
               sortOrder: sortOrder++,
             })
-            subtotal += retainerFee
+            subtotal += rAmt
           }
         }
       }
@@ -130,29 +155,45 @@ export function calculateQuote(
   for (const feeId of selection.selectedAuditorFeeIds) {
     const fee = ctx.auditorFees.find((a) => a.id === feeId)
     if (fee) {
+      const key = `auditorFee:${feeId}`
+      const comp = isComp(key, compKeys)
+      const amt = comp ? 0 : fee.feeInr
+      totalServiceValue += fee.feeInr
+      if (comp) complimentaryValue += fee.feeInr
       lines.push({
         lineType: 'auditor_fee',
         description: `Auditor Fee — ${fee.standardName} (${fee.accreditationBody})`,
         referenceId: fee.id,
         amountInr: fee.feeInr,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
-      subtotal += fee.feeInr
+      subtotal += amt
     }
   }
 
-  // 3. Add-on services (multiple)
+  // 3. Add-on services (multiple) — use tier-specific price when available
   for (const addonId of selection.selectedAddonIds) {
     const addon = ctx.addonServices.find((a) => a.id === addonId)
     if (addon) {
+      const tierPrice = selection.tierId
+        ? ctx.addonServicePrices?.find((p) => p.addonServiceId === addonId && p.tierId === selection.tierId)
+        : undefined
+      const fee = tierPrice?.priceInr ?? addon.feeInr
+      const key = `addon:${addonId}`
+      const comp = isComp(key, compKeys)
+      const amt = comp ? 0 : fee
+      totalServiceValue += fee
+      if (comp) complimentaryValue += fee
       lines.push({
         lineType: 'addon_service',
         description: addon.name,
         referenceId: addon.id,
-        amountInr: addon.feeInr,
+        amountInr: fee,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
-      subtotal += addon.feeInr
+      subtotal += amt
     }
   }
 
@@ -171,14 +212,20 @@ export function calculateQuote(
       }
     }
     if (fee > 0) {
+      const key = 'grcTool'
+      const comp = isComp(key, compKeys)
+      const amt = comp ? 0 : fee
+      totalServiceValue += fee
+      if (comp) complimentaryValue += fee
       lines.push({
         lineType: 'grc_tool',
         description: label,
         referenceId: selection.grcToolId,
         amountInr: fee,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
-      subtotal += fee
+      subtotal += amt
     }
   }
 
@@ -186,23 +233,29 @@ export function calculateQuote(
   if (selection.dpoVcisoPackageId) {
     const pkg = ctx.dpoVcisoPackages.find((p) => p.id === selection.dpoVcisoPackageId)
     if (pkg) {
+      const key = 'dpoVciso'
+      const comp = isComp(key, compKeys)
+      const amt = comp ? 0 : pkg.feeInrAnnual
+      totalServiceValue += pkg.feeInrAnnual
+      if (comp) complimentaryValue += pkg.feeInrAnnual
       lines.push({
         lineType: 'dpo_vciso',
         description: `${pkg.serviceType} — ${pkg.name} (Annual)`,
         referenceId: pkg.id,
         amountInr: pkg.feeInrAnnual,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
-      subtotal += pkg.feeInrAnnual
+      subtotal += amt
     }
   }
 
-  // 6. Discount (applied by Finance — negative line)
+  // 6. Discount (applied by Finance — negative line, never complimentary)
   const isUsd = selection.billingCurrency === 'USD'
   let discount = 0
   let effectiveDiscountPct = 0
   if (selection.discountMode === 'fixed' && selection.discountFixedInr > 0) {
-    discount = Math.min(selection.discountFixedInr, subtotal) // can't discount more than subtotal
+    discount = Math.min(selection.discountFixedInr, subtotal)
     effectiveDiscountPct = subtotal > 0 ? Math.round((discount / subtotal) * 100 * 100) / 100 : 0
     lines.push({
       lineType: 'discount',
@@ -235,6 +288,7 @@ export function calculateQuote(
     })
   }
 
+  const billableSubtotal = subtotal
   const subtotalAfterDiscount = Math.max(0, subtotal - discount)
   const gstAmount = isUsd ? 0 : Math.round(subtotalAfterDiscount * (gstRate / 100))
   const total = subtotalAfterDiscount + gstAmount
@@ -253,7 +307,30 @@ export function calculateQuote(
     gstRate,
     usdInrRate,
     billingCurrency: selection.billingCurrency || 'INR',
+    totalServiceValueInr: totalServiceValue,
+    complimentaryValueInr: complimentaryValue,
+    billableSubtotalInr: billableSubtotal,
   }
+}
+
+/**
+ * Compute suggested internal hours from framework prices for the selected tier.
+ * Returns the sum of defaultInternalHours across all selected frameworks.
+ */
+export function computeDefaultInternalHours(
+  selectedFrameworkIds: string[],
+  tierId: string | null,
+  frameworkPrices: FrameworkPrice[],
+): number {
+  if (!tierId) return 0
+  let total = 0
+  for (const fwId of selectedFrameworkIds) {
+    const price = resolveFrameworkPrice(fwId, tierId, frameworkPrices)
+    if (price && (price as unknown as { defaultInternalHours?: number }).defaultInternalHours > 0) {
+      total += (price as unknown as { defaultInternalHours: number }).defaultInternalHours
+    }
+  }
+  return total
 }
 
 /**
@@ -361,4 +438,7 @@ export const DEFAULT_QUOTE_BUILDER_SELECTION: QuoteBuilderSelection = {
   discountReason: '',
   validUntilDays: 30,
   notes: '',
+  complimentaryKeys: [],
+  customScopes: {},
+  internalHoursManuallySet: false,
 }

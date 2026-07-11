@@ -15,7 +15,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import { useQuoteBuilderStore, useNavStore } from '@/store'
-import { calculateQuote, DEFAULT_QUOTE_BUILDER_SELECTION, FRAMEWORK_CATEGORY_META } from '@/lib/quoteCalculator'
+import { calculateQuote, computeDefaultInternalHours, DEFAULT_QUOTE_BUILDER_SELECTION, FRAMEWORK_CATEGORY_META } from '@/lib/quoteCalculator'
 import { formatINR, formatUSD, formatLineAmount } from '@/lib/currency'
 import { TopBar } from '@/components/isecurify/Shell'
 import { PricingCard, SectionCard, EmptyState } from '@/components/isecurify/Atoms'
@@ -38,6 +38,7 @@ import {
   Banknote,
   Pencil,
   X,
+  Gift,
 } from 'lucide-react'
 import type {
   Framework,
@@ -56,12 +57,44 @@ interface PricingData {
   frameworkPrices: Array<{ id: string; frameworkId: string; tierId: string; projectFeeInr: number; retainerFeeInr: number }>
   auditorFees: AuditorFee[]
   addonServices: AddonService[]
+  addonServicePrices: Array<{ addonServiceId: string; tierId: string; priceInr: number }>
   grcTools: GrcTool[]
   dpoVcisoPackages: DpoVcisoPackage[]
   fxRate: number
 }
 
 const STEP_LABELS = ['Framework', 'Tier', 'Auditor', 'Add-ons', 'Tools & DPO', 'Review']
+
+// ─── Complimentary helpers ──────────────────────────────────────
+function toggleCompKey(
+  currentKeys: string[],
+  key: string,
+  update: (p: Partial<QuoteBuilderSelection>) => void,
+) {
+  update({
+    complimentaryKeys: currentKeys.includes(key)
+      ? currentKeys.filter((k) => k !== key)
+      : [...currentKeys, key],
+  })
+}
+
+function CompToggle({ isComp, onToggle }: { isComp: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onToggle() }}
+      className={cn(
+        'mt-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors',
+        isComp
+          ? 'bg-amber-100 text-amber-700 border border-amber-300'
+          : 'bg-slate-100 text-slate-400 border border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200',
+      )}
+    >
+      <Gift className="h-3 w-3" />
+      {isComp ? 'Complimentary' : 'Mark complimentary'}
+    </button>
+  )
+}
 
 export function QuoteBuilderView() {
   const store = useQuoteBuilderStore()
@@ -99,6 +132,7 @@ export function QuoteBuilderView() {
         frameworkPrices: pricing.frameworkPrices,
         auditorFees: pricing.auditorFees,
         addonServices: pricing.addonServices,
+        addonServicePrices: pricing.addonServicePrices,
         grcTools: pricing.grcTools,
         dpoVcisoPackages: pricing.dpoVcisoPackages,
         usdInrRate: pricing.fxRate,
@@ -177,6 +211,16 @@ export function QuoteBuilderView() {
               )
             })}
           </div>
+
+          {/* Active Tier indicator on steps 2-5 */}
+          {currentStep >= 2 && currentStep <= 5 && selection.tierId && (
+            <div className="flex items-center gap-2 mb-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 border border-brand-200 px-3 py-1 text-xs font-semibold text-brand-700">
+                <ShieldCheck className="h-3 w-3" />
+                Tier: {pricing.tiers.find((t) => t.id === selection.tierId)?.name || '—'}
+              </span>
+            </div>
+          )}
 
           {/* Step content */}
           {currentStep === 0 && (
@@ -271,7 +315,7 @@ function SummaryPanel({ selection, pricing, calc }: {
 }) {
   if (!calc) return null
   const selectedFrameworks = pricing.frameworks.filter((f) => selection.selectedFrameworkIds.includes(f.id))
-  const tier = pricing.tiers.find((t) => t.id === selection.tierId)
+  const hasComplimentary = calc.complimentaryValueInr > 0
 
   return (
     <div className="space-y-3">
@@ -299,10 +343,13 @@ function SummaryPanel({ selection, pricing, calc }: {
           >
             <span className={cn('text-slate-600 flex-1', isInternal && 'italic text-xs', isDiscount && 'text-rose-600')}>
               {line.description}
+              {line.isComplimentary && !isDiscount && !isInternal && (
+                <span className="ml-1 text-amber-600 text-[10px] font-medium">(Complimentary)</span>
+              )}
             </span>
             <span className={cn(
               'font-medium tabular-nums shrink-0',
-              isInternal ? 'text-slate-400 text-xs' : isDiscount ? 'text-rose-600' : 'text-slate-900',
+              isInternal ? 'text-slate-400 text-xs' : isDiscount ? 'text-rose-600' : line.isComplimentary ? 'text-slate-400' : 'text-slate-900',
             )}>
               {line.amountInr < 0 ? '-' : ''}{formatLineAmount(Math.abs(line.amountInr), calc.billingCurrency, calc.usdInrRate)}
             </span>
@@ -311,13 +358,26 @@ function SummaryPanel({ selection, pricing, calc }: {
       })}
 
       <div className="border-t border-slate-200 pt-3 space-y-1.5">
+        {/* Total Service Value — always shown */}
         <div className="flex justify-between text-sm">
-          <span className="text-slate-600">Subtotal</span>
-          <span className="font-medium text-slate-900">{formatLineAmount(calc.subtotalInr, calc.billingCurrency, calc.usdInrRate)}</span>
+          <span className="text-slate-600">Total Service Value</span>
+          <span className="font-medium text-slate-900">{formatLineAmount(calc.totalServiceValueInr, calc.billingCurrency, calc.usdInrRate)}</span>
+        </div>
+        {/* Less: Complimentary — only if > 0 */}
+        {hasComplimentary && (
+          <div className="flex justify-between text-sm">
+            <span className="text-amber-600">Less: Complimentary Items</span>
+            <span className="font-medium text-amber-600">-{formatLineAmount(calc.complimentaryValueInr, calc.billingCurrency, calc.usdInrRate)}</span>
+          </div>
+        )}
+        {/* Billable Subtotal (was "Subtotal") */}
+        <div className="flex justify-between text-sm">
+          <span className="text-slate-600">Billable Subtotal</span>
+          <span className="font-medium text-slate-900">{formatLineAmount(calc.billableSubtotalInr, calc.billingCurrency, calc.usdInrRate)}</span>
         </div>
         {calc.discountInr > 0 && (
           <div className="flex justify-between text-sm">
-            <span className="text-rose-600">Discount ({calc.discountPct}%)</span>
+            <span className="text-rose-600">Less: Discount ({calc.discountPct}%)</span>
             <span className="font-medium text-rose-600">-{formatLineAmount(calc.discountInr, calc.billingCurrency, calc.usdInrRate)}</span>
           </div>
         )}
@@ -328,7 +388,10 @@ function SummaryPanel({ selection, pricing, calc }: {
           </div>
         )}
         <div className="flex justify-between items-baseline pt-2 border-t border-slate-200">
-          <span className="text-sm font-bold text-slate-900">Grand Total</span>
+          <div>
+            <span className="text-sm font-bold text-slate-900">Grand Total</span>
+            <span className="text-[10px] text-slate-400 ml-1">(Net Payable)</span>
+          </div>
           <div className="text-right">
             {calc.billingCurrency === 'USD' ? (
               <>
@@ -336,9 +399,7 @@ function SummaryPanel({ selection, pricing, calc }: {
                 <p className="text-xs text-slate-500">No GST</p>
               </>
             ) : (
-              <>
-                <p className="text-lg font-bold text-brand-700">{formatINR(calc.totalInr)}</p>
-              </>
+              <p className="text-lg font-bold text-brand-700">{formatINR(calc.totalInr)}</p>
             )}
           </div>
         </div>
@@ -547,14 +608,21 @@ function StepFramework({ selection, update, pricing, clients }: {
               <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">{meta.label}</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {fws.map((fw) => (
-                  <PricingCard
-                    key={fw.id}
-                    selected={selection.selectedFrameworkIds.includes(fw.id)}
-                    onClick={() => toggle(fw.id)}
-                    title={fw.name}
-                    description={fw.description || undefined}
-                    badge={meta.label}
-                  />
+                  <div key={fw.id}>
+                    <PricingCard
+                      selected={selection.selectedFrameworkIds.includes(fw.id)}
+                      onClick={() => toggle(fw.id)}
+                      title={fw.name}
+                      description={fw.description || undefined}
+                      badge={meta.label}
+                    />
+                    {selection.selectedFrameworkIds.includes(fw.id) && (
+                      <CompToggle
+                        isComp={(selection.complimentaryKeys || []).includes(`framework:${fw.id}`)}
+                        onToggle={() => toggleCompKey(selection.complimentaryKeys || [], `framework:${fw.id}`, update)}
+                      />
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -720,14 +788,21 @@ function StepAuditor({ selection, update, pricing }: {
             <h4 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">{standard}</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {fees.map((fee) => (
-                <PricingCard
-                  key={fee.id}
-                  selected={selection.selectedAuditorFeeIds.includes(fee.id)}
-                  onClick={() => toggle(fee.id)}
-                  title={fee.accreditationBody}
-                  subtitle={fee.notes || undefined}
-                  fee={fee.feeInr}
-                />
+                <div key={fee.id}>
+                  <PricingCard
+                    selected={selection.selectedAuditorFeeIds.includes(fee.id)}
+                    onClick={() => toggle(fee.id)}
+                    title={fee.accreditationBody}
+                    subtitle={fee.notes || undefined}
+                    fee={fee.feeInr}
+                  />
+                  {selection.selectedAuditorFeeIds.includes(fee.id) && (
+                    <CompToggle
+                      isComp={(selection.complimentaryKeys || []).includes(`auditorFee:${fee.id}`)}
+                      onToggle={() => toggleCompKey(selection.complimentaryKeys || [], `auditorFee:${fee.id}`, update)}
+                    />
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -743,6 +818,17 @@ function StepAddons({ selection, update, pricing }: {
   update: (p: Partial<QuoteBuilderSelection>) => void
   pricing: PricingData
 }) {
+  const getAddonFee = (addonId: string) => {
+    if (selection.tierId) {
+      const tp = pricing.addonServicePrices?.find(
+        (p) => p.addonServiceId === addonId && p.tierId === selection.tierId,
+      )
+      if (tp) return tp.priceInr
+    }
+    const addon = pricing.addonServices.find((a) => a.id === addonId)
+    return addon?.feeInr ?? 0
+  }
+
   const toggle = (id: string) => {
     const ids = selection.selectedAddonIds
     update({
@@ -765,19 +851,33 @@ function StepAddons({ selection, update, pricing }: {
         )
       }
     >
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {pricing.addonServices.map((addon) => (
-          <PricingCard
-            key={addon.id}
-            selected={selection.selectedAddonIds.includes(addon.id)}
-            onClick={() => toggle(addon.id)}
-            title={addon.name}
-            subtitle={addon.category.replace(/_/g, ' ')}
-            description={addon.description || undefined}
-            fee={addon.feeInr}
-          />
-        ))}
-      </div>
+      {pricing.addonServices.length === 0 ? (
+        <EmptyState title="No add-on services" description="No add-on services configured." />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {pricing.addonServices.map((addon) => {
+            const isSel = selection.selectedAddonIds.includes(addon.id)
+            return (
+              <div key={addon.id}>
+                <PricingCard
+                  selected={isSel}
+                  onClick={() => toggle(addon.id)}
+                  title={addon.name}
+                  subtitle={addon.category.replace(/_/g, ' ')}
+                  description={addon.description || undefined}
+                  fee={getAddonFee(addon.id)}
+                />
+                {isSel && (
+                  <CompToggle
+                    isComp={(selection.complimentaryKeys || []).includes(`addon:${addon.id}`)}
+                    onToggle={() => toggleCompKey(selection.complimentaryKeys || [], `addon:${addon.id}`, update)}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </SectionCard>
   )
 }
@@ -806,15 +906,22 @@ function StepTools({ selection, update, pricing }: {
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {pricing.grcTools.map((tool) => (
-                <PricingCard
-                  key={tool.id}
-                  selected={selection.grcToolId === tool.id && selection.grcToolCustomFee === null}
-                  onClick={() => update({ grcToolId: tool.id, grcToolCustomFee: null })}
-                  title={tool.planName}
-                  subtitle={`Up to ${tool.maxUsers >= 999999 ? 'unlimited' : tool.maxUsers} users`}
-                  fee={tool.feeInrAnnual}
-                  feeLabel="/year"
-                />
+                <div key={tool.id}>
+                  <PricingCard
+                    selected={selection.grcToolId === tool.id && selection.grcToolCustomFee === null}
+                    onClick={() => update({ grcToolId: tool.id, grcToolCustomFee: null })}
+                    title={tool.planName}
+                    subtitle={`Up to ${tool.maxUsers >= 999999 ? 'unlimited' : tool.maxUsers} users`}
+                    fee={tool.feeInrAnnual}
+                    feeLabel="/year"
+                  />
+                  {selection.grcToolId === tool.id && selection.grcToolCustomFee === null && (
+                    <CompToggle
+                      isComp={(selection.complimentaryKeys || []).includes('grcTool')}
+                      onToggle={() => toggleCompKey(selection.complimentaryKeys || [], 'grcTool', update)}
+                    />
+                  )}
+                </div>
               ))}
             </div>
             <div className="rounded-lg border border-slate-200 p-4">
@@ -837,6 +944,12 @@ function StepTools({ selection, update, pricing }: {
                     placeholder="Enter custom annual fee"
                     className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-600"
                   />
+                  {selection.grcToolCustomFee > 0 && (
+                    <CompToggle
+                      isComp={(selection.complimentaryKeys || []).includes('grcTool')}
+                      onToggle={() => toggleCompKey(selection.complimentaryKeys || [], 'grcTool', update)}
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -848,18 +961,25 @@ function StepTools({ selection, update, pricing }: {
       <SectionCard title="7. DPO / vCISO Package (Optional)" description="Managed compliance service plans">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {pricing.dpoVcisoPackages.map((pkg) => (
-            <PricingCard
-              key={pkg.id}
-              selected={selection.dpoVcisoPackageId === pkg.id}
-              onClick={() => update({
-                dpoVcisoPackageId: selection.dpoVcisoPackageId === pkg.id ? null : pkg.id,
-              })}
-              title={`${pkg.serviceType} — ${pkg.name}`}
-              subtitle={`${pkg.hoursPerMonth} hours/month`}
-              fee={pkg.feeInrAnnual}
-              feeLabel="/year"
-              description={pkg.description || undefined}
-            />
+            <div key={pkg.id}>
+              <PricingCard
+                selected={selection.dpoVcisoPackageId === pkg.id}
+                onClick={() => update({
+                  dpoVcisoPackageId: selection.dpoVcisoPackageId === pkg.id ? null : pkg.id,
+                })}
+                title={`${pkg.serviceType} — ${pkg.name}`}
+                subtitle={`${pkg.hoursPerMonth} hours/month`}
+                fee={pkg.feeInrAnnual}
+                feeLabel="/year"
+                description={pkg.description || undefined}
+              />
+              {selection.dpoVcisoPackageId === pkg.id && (
+                <CompToggle
+                  isComp={(selection.complimentaryKeys || []).includes('dpoVciso')}
+                  onToggle={() => toggleCompKey(selection.complimentaryKeys || [], 'dpoVciso', update)}
+                />
+              )}
+            </div>
           ))}
         </div>
         {selection.dpoVcisoPackageId && (
@@ -1025,23 +1145,48 @@ function StepReview({ selection, update, pricing, calc, clients }: {
         </div>
 
         {calc && (
-          <div className="rounded-lg bg-brand-50 border border-brand-200 p-4">
-            <div className="flex items-center justify-between">
+          <div className="rounded-lg bg-brand-50 border border-brand-200 p-4 space-y-3">
+            {/* Total Service Value — always shown */}
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Total Service Value</span>
+              <span className="font-medium text-slate-900">{formatLineAmount(calc.totalServiceValueInr, calc.billingCurrency, calc.usdInrRate)}</span>
+            </div>
+            {/* Less: Complimentary — only if > 0 */}
+            {calc.complimentaryValueInr > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-amber-600">Less: Complimentary Items</span>
+                <span className="font-medium text-amber-600">-{formatLineAmount(calc.complimentaryValueInr, calc.billingCurrency, calc.usdInrRate)}</span>
+              </div>
+            )}
+            {/* Billable Subtotal */}
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600">Billable Subtotal</span>
+              <span className="font-medium text-slate-900">{formatLineAmount(calc.billableSubtotalInr, calc.billingCurrency, calc.usdInrRate)}</span>
+            </div>
+            {calc.discountInr > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-rose-600">Less: Discount ({calc.discountPct}%)</span>
+                <span className="font-medium text-rose-600">-{formatLineAmount(calc.discountInr, calc.billingCurrency, calc.usdInrRate)}</span>
+              </div>
+            )}
+            {calc.gstAmountInr > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">GST @ {calc.gstRate}%</span>
+                <span className="font-medium text-slate-900">{formatLineAmount(calc.gstAmountInr, calc.billingCurrency, calc.usdInrRate)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-3 border-t border-brand-300">
               <div>
-                {calc.billingCurrency === 'USD' ? (
-                  <p className="text-xs text-brand-700 font-medium">Grand Total (USD, no GST)</p>
-                ) : (
-                  <p className="text-xs text-brand-700 font-medium">Grand Total (incl. GST @ {calc.gstRate}%)</p>
-                )}
+                <p className="text-xs text-brand-700 font-medium">
+                  {calc.billingCurrency === 'USD' ? 'Grand Total (USD, no GST)' : `Grand Total (incl. GST @ ${calc.gstRate}%)`}
+                </p>
                 <p className="text-xs text-brand-600">Valid for {selection.validUntilDays} days{calc.billingCurrency === 'USD' ? ` • USD @ ₹${calc.usdInrRate}` : ''}</p>
               </div>
               <div className="text-right">
                 {calc.billingCurrency === 'USD' ? (
                   <p className="text-2xl font-bold text-brand-800">{formatUSD(calc.totalUsd)}</p>
                 ) : (
-                  <>
-                    <p className="text-2xl font-bold text-brand-800">{formatINR(calc.totalInr)}</p>
-                  </>
+                  <p className="text-2xl font-bold text-brand-800">{formatINR(calc.totalInr)}</p>
                 )}
               </div>
             </div>

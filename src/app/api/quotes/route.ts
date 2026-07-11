@@ -68,6 +68,8 @@ export async function POST(req: NextRequest) {
         discountReason: string
         validUntilDays: number
         notes: string
+        complimentaryKeys?: string[]
+        customScopes?: Record<string, string>
       }
       submit: boolean
     }
@@ -174,14 +176,20 @@ async function buildLineItems(
     discountMode?: string
     discountFixedInr?: number
     discountReason: string
+    complimentaryKeys?: string[]
+    customScopes?: Record<string, string>
   },
   computed: { subtotalInr: number; discountInr: number; discountPct: number; discountMode?: string },
 ) {
+  const compKeys = new Set(selection.complimentaryKeys || [])
+  const customScopes = selection.customScopes || {}
   const lines: Array<{
     lineType: string
     description: string
     referenceId: string | null
     amountInr: number
+    isComplimentary: boolean
+    customScope?: string | null
     sortOrder: number
   }> = []
   let sortOrder = 0
@@ -200,11 +208,14 @@ async function buildLineItems(
     const tier = await db.tier.findUnique({ where: { id: selection.tierId } })
 
     if (price && framework && tier) {
+      const comp = compKeys.has(`framework:${fwId}`)
       lines.push({
         lineType: 'consulting_fee',
         description: `${framework.name} — Consulting Fee (${tier.name})`,
         referenceId: framework.id,
         amountInr: price.projectFeeInr,
+        isComplimentary: comp,
+        customScope: customScopes[fwId] || null,
         sortOrder: sortOrder++,
       })
 
@@ -212,6 +223,7 @@ async function buildLineItems(
         const isFixed = selection.retainerMode === 'fixed' && selection.retainerCustomInr != null && selection.retainerCustomInr > 0
         const retainerFee = isFixed ? selection.retainerCustomInr : price.retainerFeeInr
         if (retainerFee > 0) {
+          const rComp = compKeys.has('retainer')
           lines.push({
             lineType: 'retainer',
             description: isFixed
@@ -219,6 +231,7 @@ async function buildLineItems(
               : `Annual Retainer — ${framework.name} (${tier.retainerPct}% of project fee)`,
             referenceId: tier.id,
             amountInr: retainerFee,
+            isComplimentary: rComp,
             sortOrder: sortOrder++,
           })
         }
@@ -230,25 +243,33 @@ async function buildLineItems(
   for (const feeId of selection.selectedAuditorFeeIds) {
     const fee = await db.auditorFee.findUnique({ where: { id: feeId } })
     if (fee) {
+      const comp = compKeys.has(`auditorFee:${feeId}`)
       lines.push({
         lineType: 'auditor_fee',
         description: `Auditor Fee — ${fee.standardName} (${fee.accreditationBody})`,
         referenceId: fee.id,
         amountInr: fee.feeInr,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
     }
   }
 
-  // Add-on services
+  // Add-on services — use tier-specific price when available
   for (const addonId of selection.selectedAddonIds) {
     const addon = await db.addonService.findUnique({ where: { id: addonId } })
     if (addon) {
+      const tierPrice = await db.addonServicePrice.findFirst({
+        where: { addonServiceId: addonId, tierId: selection.tierId },
+      })
+      const fee = tierPrice?.priceInr ?? addon.feeInr
+      const comp = compKeys.has(`addon:${addonId}`)
       lines.push({
         lineType: 'addon_service',
         description: addon.name,
         referenceId: addon.id,
-        amountInr: addon.feeInr,
+        amountInr: fee,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
     }
@@ -269,11 +290,13 @@ async function buildLineItems(
       }
     }
     if (fee > 0) {
+      const comp = compKeys.has('grcTool')
       lines.push({
         lineType: 'grc_tool',
         description: label,
         referenceId: selection.grcToolId,
         amountInr: fee,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
     }
@@ -283,11 +306,13 @@ async function buildLineItems(
   if (selection.dpoVcisoPackageId) {
     const pkg = await db.dpoVcisoPackage.findUnique({ where: { id: selection.dpoVcisoPackageId } })
     if (pkg) {
+      const comp = compKeys.has('dpoVciso')
       lines.push({
         lineType: 'dpo_vciso',
         description: `${pkg.serviceType} — ${pkg.name} (Annual)`,
         referenceId: pkg.id,
         amountInr: pkg.feeInrAnnual,
+        isComplimentary: comp,
         sortOrder: sortOrder++,
       })
     }
@@ -304,6 +329,7 @@ async function buildLineItems(
       description: discLabel,
       referenceId: null,
       amountInr: -computed.discountInr,
+      isComplimentary: false,
       sortOrder: sortOrder++,
     })
   }
@@ -316,6 +342,7 @@ async function buildLineItems(
       description: `Internal time cost (advisory – not billed) — ${selection.internalHours}h × ₹${selection.internalHourlyRate}/hr`,
       referenceId: null,
       amountInr: internalCost,
+      isComplimentary: false,
       sortOrder: sortOrder++,
     })
   }

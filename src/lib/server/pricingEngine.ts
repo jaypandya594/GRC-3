@@ -17,6 +17,9 @@ export interface ComputeQuoteResult {
   retainerAmountInr: number
   usdInrRate: number
   gstRate: number
+  totalServiceValueInr: number
+  complimentaryValueInr: number
+  billableSubtotalInr: number
 }
 
 /**
@@ -30,7 +33,12 @@ export async function computeQuote(
 ): Promise<ComputeQuoteResult> {
   const { db } = await import('@/lib/db')
 
+  const complimentarySet = new Set(selection.complimentaryKeys || [])
+  const isComplimentary = (key: string) => complimentarySet.has(key)
+
   let subtotal = 0
+  let totalServiceValue = 0
+  let complimentaryValue = 0
   let retainerAmount = 0
   const isUsd = selection.billingCurrency === 'USD'
 
@@ -46,14 +54,23 @@ export async function computeQuote(
         },
       })
       if (price) {
-        subtotal += price.projectFeeInr
+        const comp = isComplimentary(`framework:${fwId}`)
+        const amt = comp ? 0 : price.projectFeeInr
+        totalServiceValue += price.projectFeeInr
+        if (comp) complimentaryValue += price.projectFeeInr
+        subtotal += amt
+
         // Retainer
         if (selection.includeRetainer) {
           const isFixed = selection.retainerMode === 'fixed' && selection.retainerCustomInr != null && selection.retainerCustomInr > 0
-          const retainerFee = isFixed ? selection.retainerCustomInr : price.retainerFeeInr
+          const retainerFee: number = isFixed ? (selection.retainerCustomInr ?? 0) : price.retainerFeeInr
           if (retainerFee > 0) {
+            const rComp = isComplimentary('retainer')
+            const rAmt = rComp ? 0 : retainerFee
             retainerAmount += retainerFee
-            subtotal += retainerFee
+            totalServiceValue += retainerFee
+            if (rComp) complimentaryValue += retainerFee
+            subtotal += rAmt
           }
         }
       }
@@ -63,13 +80,29 @@ export async function computeQuote(
   // 2. Auditor fees
   for (const feeId of selection.selectedAuditorFeeIds) {
     const fee = await db.auditorFee.findUnique({ where: { id: feeId } })
-    if (fee) subtotal += fee.feeInr
+    if (fee) {
+      const comp = isComplimentary(`auditorFee:${feeId}`)
+      const amt = comp ? 0 : fee.feeInr
+      totalServiceValue += fee.feeInr
+      if (comp) complimentaryValue += fee.feeInr
+      subtotal += amt
+    }
   }
 
-  // 3. Add-on services
+  // 3. Add-on services — use tier-specific price when available
   for (const addonId of selection.selectedAddonIds) {
     const addon = await db.addonService.findUnique({ where: { id: addonId } })
-    if (addon) subtotal += addon.feeInr
+    if (addon) {
+      const tierPrice = selection.tierId
+        ? await db.addonServicePrice.findFirst({ where: { addonServiceId: addonId, tierId: selection.tierId } })
+        : null
+      const fee = tierPrice?.priceInr ?? addon.feeInr
+      const comp = isComplimentary(`addon:${addonId}`)
+      const amt = comp ? 0 : fee
+      totalServiceValue += fee
+      if (comp) complimentaryValue += fee
+      subtotal += amt
+    }
   }
 
   // 4. GRC Tool
@@ -81,13 +114,25 @@ export async function computeQuote(
       const tool = await db.grcTool.findUnique({ where: { id: selection.grcToolId } })
       if (tool) fee = tool.feeInrAnnual
     }
-    subtotal += fee
+    if (fee > 0) {
+      const comp = isComplimentary('grcTool')
+      const amt = comp ? 0 : fee
+      totalServiceValue += fee
+      if (comp) complimentaryValue += fee
+      subtotal += amt
+    }
   }
 
   // 5. DPO/vCISO
   if (selection.dpoVcisoPackageId) {
     const pkg = await db.dpoVcisoPackage.findUnique({ where: { id: selection.dpoVcisoPackageId } })
-    if (pkg) subtotal += pkg.feeInrAnnual
+    if (pkg) {
+      const comp = isComplimentary('dpoVciso')
+      const amt = comp ? 0 : pkg.feeInrAnnual
+      totalServiceValue += pkg.feeInrAnnual
+      if (comp) complimentaryValue += pkg.feeInrAnnual
+      subtotal += amt
+    }
   }
 
   // 6. Discount
@@ -101,6 +146,7 @@ export async function computeQuote(
     discountInr = Math.round(subtotal * (discountPct / 100))
   }
 
+  const billableSubtotal = subtotal
   const subtotalAfterDiscount = Math.max(0, subtotal - discountInr)
   const gstAmount = isUsd ? 0 : Math.round(subtotalAfterDiscount * (gstRate / 100))
   const total = subtotalAfterDiscount + gstAmount
@@ -116,5 +162,8 @@ export async function computeQuote(
     retainerAmountInr: retainerAmount,
     usdInrRate,
     gstRate,
+    totalServiceValueInr: totalServiceValue,
+    complimentaryValueInr: complimentaryValue,
+    billableSubtotalInr: billableSubtotal,
   }
 }

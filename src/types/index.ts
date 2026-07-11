@@ -198,6 +198,8 @@ export interface QuoteLineItem {
   description: string
   referenceId?: string | null
   amountInr: number
+  isComplimentary?: boolean
+  customScope?: string | null
   sortOrder: number
 }
 
@@ -279,6 +281,9 @@ export interface QuoteBuilderSelection {
   discountReason: string
   validUntilDays: number
   notes: string
+  complimentaryKeys: string[]
+  customScopes: Record<string, string>
+  internalHoursManuallySet: boolean
 }
 
 // ── Dashboard stats ───────────────────────────────────────────
