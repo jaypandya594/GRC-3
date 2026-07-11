@@ -33,7 +33,7 @@ export async function computeQuote(
 ): Promise<ComputeQuoteResult> {
   const { db } = await import('@/lib/db')
 
-  const complimentarySet = new Set(selection.complimentaryKeys || [])
+  const complimentarySet = new Set(Array.isArray(selection.complimentaryKeys) ? selection.complimentaryKeys : [])
   const isComplimentary = (key: string) => complimentarySet.has(key)
 
   let subtotal = 0
@@ -42,8 +42,12 @@ export async function computeQuote(
   let retainerAmount = 0
   const isUsd = selection.billingCurrency === 'USD'
 
+  // Guard arrays that could be undefined
+  const fwIds = Array.isArray(selection.selectedFrameworkIds) ? selection.selectedFrameworkIds : []
+  const auditorFeeIds = Array.isArray(selection.selectedAuditorFeeIds) ? selection.selectedAuditorFeeIds : []
+  const addonIds = Array.isArray(selection.selectedAddonIds) ? selection.selectedAddonIds : []
+
   // 1. Consulting fees (multiple frameworks)
-  const fwIds = selection.selectedFrameworkIds || []
   for (const fwId of fwIds) {
     if (selection.tierId) {
       const price = await db.frameworkPrice.findFirst({
@@ -78,7 +82,7 @@ export async function computeQuote(
   }
 
   // 2. Auditor fees
-  for (const feeId of selection.selectedAuditorFeeIds) {
+  for (const feeId of auditorFeeIds) {
     const fee = await db.auditorFee.findUnique({ where: { id: feeId } })
     if (fee) {
       const comp = isComplimentary(`auditorFee:${feeId}`)
@@ -90,7 +94,7 @@ export async function computeQuote(
   }
 
   // 3. Add-on services — use tier-specific price when available
-  for (const addonId of selection.selectedAddonIds) {
+  for (const addonId of addonIds) {
     const addon = await db.addonService.findUnique({ where: { id: addonId } })
     if (addon) {
       const tierPrice = selection.tierId

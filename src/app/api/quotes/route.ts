@@ -74,8 +74,18 @@ export async function POST(req: NextRequest) {
       submit: boolean
     }
 
-    const fwIds = selection.selectedFrameworkIds || []
-    if (!selection?.clientId || fwIds.length === 0 || !selection?.tierId) {
+    // Apply safe defaults for arrays/objects that could be missing from the request
+    const safeSelection = {
+      ...selection,
+      selectedFrameworkIds: Array.isArray(selection.selectedFrameworkIds) ? selection.selectedFrameworkIds : [],
+      selectedAuditorFeeIds: Array.isArray(selection.selectedAuditorFeeIds) ? selection.selectedAuditorFeeIds : [],
+      selectedAddonIds: Array.isArray(selection.selectedAddonIds) ? selection.selectedAddonIds : [],
+      complimentaryKeys: Array.isArray(selection.complimentaryKeys) ? selection.complimentaryKeys : [],
+      customScopes: (selection.customScopes && typeof selection.customScopes === 'object') ? selection.customScopes : {},
+    }
+
+    const fwIds = safeSelection.selectedFrameworkIds
+    if (!safeSelection.clientId || fwIds.length === 0 || !safeSelection.tierId) {
       return NextResponse.json({ error: 'Client, at least one framework, and tier are required' }, { status: 400 })
     }
 
@@ -87,7 +97,7 @@ export async function POST(req: NextRequest) {
     const liveRate = fxRow?.rate ?? 83
 
     // Compute quote using server-side engine with the live configured rate
-    const computed = await computeQuote(selection, liveRate, GST_RATE)
+    const computed = await computeQuote(safeSelection, liveRate, GST_RATE)
     const validUntil = selection.validUntilDays
       ? addDays(new Date(), selection.validUntilDays)
       : null
@@ -125,7 +135,7 @@ export async function POST(req: NextRequest) {
         notes: selection.notes || null,
         createdById: CREATED_BY_ID,
         lineItems: {
-          create: await buildLineItems(selection, computed),
+          create: await buildLineItems(safeSelection, computed),
         },
         approvals: submit
           ? {
@@ -151,8 +161,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data: quote }, { status: 201 })
   } catch (err) {
-    console.error('[POST /api/quotes] error:', err)
-    return NextResponse.json({ error: 'Failed to create quote' }, { status: 500 })
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    const stack = err instanceof Error ? err.stack : undefined
+    console.error('[POST /api/quotes] error:', message, stack)
+    return NextResponse.json(
+      { error: `Failed to create quote: ${message}` },
+      { status: 500 },
+    )
   }
 }
 
@@ -183,6 +198,9 @@ async function buildLineItems(
 ) {
   const compKeys = new Set(selection.complimentaryKeys || [])
   const customScopes = selection.customScopes || {}
+  const fwIds = Array.isArray(selection.selectedFrameworkIds) ? selection.selectedFrameworkIds : []
+  const auditorFeeIds = Array.isArray(selection.selectedAuditorFeeIds) ? selection.selectedAuditorFeeIds : []
+  const addonIds = Array.isArray(selection.selectedAddonIds) ? selection.selectedAddonIds : []
   const lines: Array<{
     lineType: string
     description: string
@@ -195,7 +213,6 @@ async function buildLineItems(
   let sortOrder = 0
 
   // Consulting fees — one per selected framework
-  const fwIds = selection.selectedFrameworkIds || []
   for (const fwId of fwIds) {
     const price = await db.frameworkPrice.findFirst({
       where: {
@@ -240,7 +257,7 @@ async function buildLineItems(
   }
 
   // Auditor fees
-  for (const feeId of selection.selectedAuditorFeeIds) {
+  for (const feeId of auditorFeeIds) {
     const fee = await db.auditorFee.findUnique({ where: { id: feeId } })
     if (fee) {
       const comp = compKeys.has(`auditorFee:${feeId}`)
@@ -256,7 +273,7 @@ async function buildLineItems(
   }
 
   // Add-on services — use tier-specific price when available
-  for (const addonId of selection.selectedAddonIds) {
+  for (const addonId of addonIds) {
     const addon = await db.addonService.findUnique({ where: { id: addonId } })
     if (addon) {
       const tierPrice = await db.addonServicePrice.findFirst({

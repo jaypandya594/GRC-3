@@ -108,9 +108,10 @@ model Tier {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  frameworkPrices FrameworkPrice[]
-  quotes          Quote[]
+  tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  frameworkPrices    FrameworkPrice[]
+  addonServicePrices AddonServicePrice[]
+  quotes             Quote[]
 
   @@index([tenantId])
 }
@@ -172,9 +173,29 @@ model AddonService {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant             Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  addonServicePrices AddonServicePrice[]
 
   @@index([tenantId])
+}
+
+// ============================================================
+// 7b. addon_service_prices — per-tier pricing for add-on services
+// ============================================================
+model AddonServicePrice {
+  id             String   @id @default(cuid())
+  addonServiceId String
+  tierId         String
+  priceInr       Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  addonService AddonService @relation(fields: [addonServiceId], references: [id], onDelete: Cascade)
+  tier         Tier         @relation(fields: [tierId], references: [id], onDelete: Cascade)
+
+  @@unique([addonServiceId, tierId])
+  @@index([addonServiceId])
+  @@index([tierId])
 }
 
 // ============================================================
@@ -301,14 +322,16 @@ model Quote {
 // 12. quote_line_items — individual priced lines on a quote
 // ============================================================
 model QuoteLineItem {
-  id           String   @id @default(cuid())
-  quoteId      String
-  lineType     String   // consulting_fee | auditor_fee | addon_service | grc_tool | dpo_vciso | retainer | discount | internal_time
-  description  String
-  referenceId  String?
-  amountInr    Float    @default(0)
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
+  id             String   @id @default(cuid())
+  quoteId        String
+  lineType       String   // consulting_fee | auditor_fee | addon_service | grc_tool | dpo_vciso | retainer | discount | internal_time
+  description    String
+  referenceId    String?
+  amountInr      Float    @default(0)
+  isComplimentary Boolean  @default(false)
+  customScope    String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
 
   quote Quote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 

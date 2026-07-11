@@ -9,13 +9,35 @@ class ApiClient {
   private baseUrl = '/api'
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
-      ...init,
-    })
-    const json: ApiResponse<T> = await res.json()
+    let res: Response
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        headers: { 'Content-Type': 'application/json', ...init?.headers },
+        ...init,
+      })
+    } catch (fetchErr) {
+      // Network error, DNS failure, request aborted, etc.
+      const msg = fetchErr instanceof Error ? fetchErr.message : 'Network error'
+      throw new Error(`Network request failed: ${msg}`)
+    }
+
+    // Try to parse JSON body — handle empty or non-JSON responses gracefully
+    let json: ApiResponse<T>
+    try {
+      json = await res.json()
+    } catch {
+      // Body is empty, not JSON, or truncated
+      throw new Error(
+        `Server returned ${res.status} ${res.statusText} with an invalid or empty response body`,
+      )
+    }
+
+    // Check for application-level error (our standard { error: string } envelope)
     if (json.error) throw new Error(json.error)
+
+    // Check HTTP status for any other non-2xx responses
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`)
+
     return json.data as T
   }
 

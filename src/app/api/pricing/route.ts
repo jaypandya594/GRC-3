@@ -14,6 +14,7 @@ export async function GET() {
       frameworkPrices,
       auditorFees,
       addonServices,
+      addonServicePrices,
       grcTools,
       dpoVcisoPackages,
       fxRate,
@@ -36,6 +37,9 @@ export async function GET() {
       db.addonService.findMany({
         orderBy: { sortOrder: 'asc' },
       }),
+      db.addonServicePrice.findMany({
+        select: { addonServiceId: true, tierId: true, priceInr: true },
+      }),
       db.grcTool.findMany({
         orderBy: { feeInrAnnual: 'asc' },
       }),
@@ -52,6 +56,7 @@ export async function GET() {
         frameworkPrices,
         auditorFees,
         addonServices,
+        addonServicePrices,
         grcTools,
         dpoVcisoPackages,
         fxRate: fxRate?.rate ?? 83,
