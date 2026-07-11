@@ -66,6 +66,7 @@ import type {
   FrameworkPrice,
   AuditorFee,
   AddonService,
+  AddonServicePrice,
   GrcTool,
   DpoVcisoPackage,
   FrameworkCategory,
@@ -80,6 +81,7 @@ type Section =
   | 'prices'
   | 'auditors'
   | 'addons'
+  | 'addon-prices'
   | 'grc'
   | 'dpo'
   | 'fx'
@@ -90,6 +92,7 @@ const SECTIONS: Array<{ id: Section; label: string; icon: React.ReactNode }> = [
   { id: 'prices', label: 'Framework Prices', icon: <Banknote className="h-4 w-4" /> },
   { id: 'auditors', label: 'Auditor Fees', icon: <Check className="h-4 w-4" /> },
   { id: 'addons', label: 'Add-on Services', icon: <Package className="h-4 w-4" /> },
+  { id: 'addon-prices', label: 'Addon Prices', icon: <Banknote className="h-4 w-4" /> },
   { id: 'grc', label: 'GRC Tools', icon: <Wrench className="h-4 w-4" /> },
   { id: 'dpo', label: 'DPO / vCISO', icon: <Clock className="h-4 w-4" /> },
   { id: 'fx', label: 'FX Rate', icon: <TrendingUp className="h-4 w-4" /> },
@@ -101,6 +104,7 @@ interface PricingData {
   frameworkPrices: FrameworkPrice[]
   auditorFees: AuditorFee[]
   addonServices: AddonService[]
+  addonServicePrices: AddonServicePrice[]
   grcTools: GrcTool[]
   dpoVcisoPackages: DpoVcisoPackage[]
   fxRate: number
@@ -207,6 +211,7 @@ export function AdminView() {
               {section === 'prices' && <PricesSection prices={data.frameworkPrices} frameworks={data.frameworks} tiers={data.tiers} />}
               {section === 'auditors' && <AuditorsSection fees={data.auditorFees} />}
               {section === 'addons' && <AddonsSection addons={data.addonServices} />}
+              {section === 'addon-prices' && <AddonPricesSection prices={data.addonServicePrices} addons={data.addonServices} tiers={data.tiers} />}
               {section === 'grc' && <GrcSection tools={data.grcTools} />}
               {section === 'dpo' && <DpoSection packages={data.dpoVcisoPackages} />}
               {section === 'fx' && <FxSection rate={data.fxRate} />}
@@ -858,6 +863,143 @@ function AddonsSection({ addons }: { addons: AddonService[] }) {
               <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
                 {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
                 {editing ? 'Update' : 'Create'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </SectionCard>
+  )
+}
+
+// ─── 5b. Add-on Service Prices (per-tier grid) ──────────
+
+function AddonPricesSection({ prices, addons, tiers }: {
+  prices: AddonServicePrice[]
+  addons: AddonService[]
+  tiers: Tier[]
+}) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({ addonServiceId: '', tierId: '', priceInr: 0 })
+  const [cellTarget, setCellTarget] = useState<{ addonServiceId: string; tierId: string } | null>(null)
+
+  const resetForm = useCallback((p?: AddonServicePrice, aId?: string, tId?: string) => {
+    if (p) setForm({ addonServiceId: p.addonServiceId, tierId: p.tierId, priceInr: p.priceInr })
+    else setForm({ addonServiceId: aId || '', tierId: tId || '', priceInr: 0 })
+  }, [])
+
+  const openCell = (aId: string, tId: string, price?: AddonServicePrice) => {
+    if (price) {
+      resetForm(price)
+    } else {
+      resetForm(undefined, aId, tId)
+    }
+    setCellTarget({ addonServiceId: aId, tierId: tId })
+    setOpen(true)
+  }
+
+  const addMutation = useMutation({
+    mutationFn: (body: typeof form) => api.post<AddonServicePrice>('/admin/addon-prices', body),
+    onSuccess: () => { toast.success('Addon price added'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const editMutation = useMutation({
+    mutationFn: (body: { priceInr: number }) => api.put<AddonServicePrice>(`/admin/addon-prices/${editingId}`, body),
+    onSuccess: () => { toast.success('Addon price updated'); setOpen(false); qc.invalidateQueries({ queryKey: ['pricing'] }) },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  // Find existing price ID for cell editing
+  const priceMap = new Map<string, AddonServicePrice & { _id: string }>()
+  prices.forEach((p) => priceMap.set(`${p.addonServiceId}-${p.tierId}`, { ...p, _id: p.id }))
+  const editingId = cellTarget ? priceMap.get(`${cellTarget.addonServiceId}-${cellTarget.tierId}`)?._id : null
+
+  const handleSubmit = () => {
+    if (!form.addonServiceId || !form.tierId) { toast.error('Add-on and Tier are required'); return }
+    if (editingId) {
+      editMutation.mutate({ priceInr: form.priceInr })
+    } else {
+      addMutation.mutate(form)
+    }
+  }
+
+  const activeAddons = addons.filter((a) => a.isActive).sort((a, b) => a.sortOrder - b.sortOrder)
+  const activeTiers = tiers.filter((t) => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder)
+
+  return (
+    <SectionCard
+      title="Addon Price Grid"
+      description="Rows = add-on services, columns = tiers. Click any cell to edit."
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="text-left px-3 py-2 font-semibold text-slate-600 sticky left-0 bg-white z-10">Add-on Service</th>
+              {activeTiers.map((t) => (
+                <th key={t.id} className="text-right px-3 py-2 font-semibold text-slate-600 whitespace-nowrap">
+                  {t.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {activeAddons.map((addon) => (
+              <tr key={addon.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <td className="px-3 py-2 font-medium text-slate-900 sticky left-0 bg-white z-10">
+                  {addon.name}
+                  <span className="block text-[10px] text-slate-400">Base: {formatINR(addon.feeInr)}</span>
+                </td>
+                {activeTiers.map((t) => {
+                  const price = priceMap.get(`${addon.id}-${t.id}`)
+                  return (
+                    <td
+                      key={t.id}
+                      className="text-right px-3 py-2 tabular-nums text-slate-700 cursor-pointer hover:bg-brand-50 transition-colors"
+                      onClick={() => openCell(addon.id, t.id, price || undefined)}
+                    >
+                      {price ? formatINR(price.priceInr) : (
+                        <span className="text-slate-300 hover:text-brand-600 text-xs">+ Set</span>
+                      )}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setCellTarget(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingId ? 'Edit Addon Price' : 'Set Addon Price'}</DialogTitle>
+            <DialogDescription>Set the INR price for this add-on service at a specific tier</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            {cellTarget && (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600">
+                <span className="font-medium text-slate-900">{activeAddons.find(a => a.id === cellTarget.addonServiceId)?.name || cellTarget.addonServiceId}</span>
+                {' → '}
+                <span className="font-medium text-slate-900">{activeTiers.find(t => t.id === cellTarget.tierId)?.name || cellTarget.tierId}</span>
+              </div>
+            )}
+            <FormField label="Price (INR)">
+              <Input
+                type="number"
+                value={form.priceInr || ''}
+                onChange={(e) => setForm({ ...form, priceInr: parseFloat(e.target.value) || 0 })}
+                placeholder="Enter price"
+                autoFocus
+              />
+            </FormField>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button size="sm" className="bg-brand-700 hover:bg-brand-800 text-white" onClick={handleSubmit} disabled={addMutation.isPending || editMutation.isPending}>
+                {(addMutation.isPending || editMutation.isPending) && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                {editingId ? 'Update' : 'Create'}
               </Button>
             </div>
           </div>

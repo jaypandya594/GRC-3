@@ -145,6 +145,15 @@ export interface AddonService {
   sortOrder: number
 }
 
+export interface AddonServicePrice {
+  id: string
+  addonServiceId: string
+  tierId: string
+  priceInr: number
+  addonService?: { id: string; name: string }
+  tier?: { id: string; name: string }
+}
+
 export interface GrcTool {
   id: string
   tenantId?: string | null

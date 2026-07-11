@@ -226,3 +226,28 @@ Stage Summary:
   - `src/lib/server/pricingEngine.ts` — Added Array.isArray guards for fwIds, auditorFeeIds, addonIds, complimentaryKeys
 - **Database:** Added AddonServicePrice table, isComplimentary + customScope columns on QuoteLineItem, backfilled 24 price rows
 - **Verified:** Quote submit works (201 PENDING_REVIEW), complimentary items stored correctly, tier-specific addon pricing (₹50,000 Enterprise vs ₹25,000 base), custom scope text saved on line items, error messages are now specific
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix addon tier-wise pricing — admin grid, verify wizard display, consistency
+
+Work Log:
+- Audited full codebase to identify exactly what was already implemented vs missing
+- Confirmed ALREADY WORKING: AddonServicePrice schema model, /api/pricing includes addonServicePrices, getAddonFee() tier lookup in Step 4, tier badge on steps 2-5, server/client calculators use tier-specific pricing
+- Found backfill had tier-multiplied values (1x/1.5x/2x) instead of flat feeInr per user's spec — reset all 24 rows to use flat feeInr
+- Added AddonServicePrice TypeScript interface to types/index.ts
+- Added addonServicePrices to admin PricingData interface in AdminView.tsx
+- Created /api/admin/addon-prices/route.ts (GET list, POST create)
+- Created /api/admin/addon-prices/[id]/route.ts (PUT update, DELETE)
+- Added "Addon Prices" tab to admin section navigation
+- Built AddonPricesSection component in AdminView — per-cell clickable grid matching Framework Prices pattern exactly (rows=addons, columns=tiers, each cell edits its own addonServiceId+tierId)
+- Generated Prisma migration 20250620_addon_service_price_table with SQL and marked as applied
+- Verified consistency: tier change triggers full recalculation since calc is derived from selection on every render
+- Lint passes clean, APIs verified (pricing returns 24 addonServicePrices, admin addon-prices returns 24 with names)
+
+Stage Summary:
+- **Files created:** prisma/migrations/20250620_addon_service_price_table/migration.sql, prisma/migrations/20250620_addon_service_price_table/migration_lock.toml, src/app/api/admin/addon-prices/route.ts, src/app/api/admin/addon-prices/[id]/route.ts
+- **Files modified:** src/types/index.ts (added AddonServicePrice interface), src/components/isecurify/AdminView.tsx (added import, PricingData field, tab, section rendering, AddonPricesSection component)
+- **Database:** Reset 24 AddonServicePrice rows from tier-multiplied to flat feeInr values
+- **NOT modified (per user instructions):** complimentary marking, auditor filtering, customScope, quoteNumber, DPO tier linking, internal hours defaults, tier sortOrder
